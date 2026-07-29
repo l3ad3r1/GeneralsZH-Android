@@ -338,7 +338,15 @@ int main(int argc, char* argv[])
 				__android_log_print(ANDROID_LOG_INFO, "GeneralsX", "CWD -> %s (external)", gameData);
 				chdirOk = true;
 			}
-			SDL_free((void*)extFiles);
+			// GeneralsX @bugfix android-port 07/29/2026 Do NOT SDL_free() this.
+			// SDL_GetAndroidExternalStoragePath()/InternalStoragePath()/CachePath()
+			// all return a pointer to SDL's own cached static (SDL_strdup'd once,
+			// then returned again on every call) — not a fresh allocation. Freeing
+			// it here poisoned the same pointer that a later call in this function
+			// (or SDL itself) hands back, and the *next* SDL_free() on it aborted
+			// with a Scudo "invalid chunk state" crash on the very first launch
+			// path (whether or not GameData was found). None of the five
+			// SDL_free() calls that used to be in this function were needed.
 		}
 		if (!chdirOk && files != nullptr) {
 			char gameData[1024];
@@ -366,14 +374,14 @@ int main(int argc, char* argv[])
 			if (extFiles2 != nullptr) {
 				snprintf(fontsDir, sizeof(fontsDir), "%s/GameData/fonts", extFiles2);
 				extractBase = fontsDir;
-				SDL_free((void*)extFiles2);
+				// see @bugfix note above: SDL owns this pointer, do not free it.
 			}
 			if (extractBase == nullptr) {
 				const char *intFiles2 = SDL_GetAndroidInternalStoragePath();
 				if (intFiles2 != nullptr) {
 					snprintf(fontsDir, sizeof(fontsDir), "%s/GameData/fonts", intFiles2);
 					extractBase = fontsDir;
-					SDL_free((void*)intFiles2);
+					// see @bugfix note above: SDL owns this pointer, do not free it.
 				}
 			}
 
@@ -450,7 +458,7 @@ int main(int argc, char* argv[])
 			const char *cache = SDL_GetAndroidCachePath();
 			if (cache != nullptr) {
 				setenv("DXVK_STATE_CACHE_PATH", cache, 0);
-				SDL_free((void*)cache);
+				// see @bugfix note above: SDL owns this pointer, do not free it.
 			}
 			// Capped, filtered stderr file sink (post-mortem evidence after a kill).
 			char logPath[1100], prevPath[1100];
@@ -468,7 +476,7 @@ int main(int argc, char* argv[])
 				dup2(s_logFd, STDERR_FILENO);
 				setvbuf(stderr, nullptr, _IOLBF, 0);
 			}
-			SDL_free((void*)files);
+			// see @bugfix note above: SDL owns this pointer, do not free it.
 		}
 	}
 #elif defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -700,6 +708,18 @@ int main(int argc, char* argv[])
 		// SDL3GameEngine.cpp; SDL's automatic touch->mouse synthesis would
 		// double-deliver finger 1 and fight the two-finger pan logic.
 		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#endif
+#if defined(__ANDROID__)
+		// GeneralsX @bugfix android-port 07/29/2026 Force landscape at the SDL
+		// level. Without this hint, SDLActivity derives its own orientation
+		// (observed requestedOrientation=13/FULL_USER) and lets the panel's
+		// native portrait mode dictate the Vulkan surface transform. On a
+		// portrait-native panel (e.g. Galaxy S24 Ultra) that made every
+		// present() come back VK_SUBOPTIMAL_KHR, which DXVK's presenter
+		// treated as "recreate the swapchain" — tens of recreations per
+		// second, which lost a free-list race in DxvkResourceAllocationPool
+		// and crashed with SIGSEGV within seconds to a couple of minutes.
+		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 		if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
 			fprintf(stderr, "FATAL: Failed to initialize SDL3: %s\n", SDL_GetError());
