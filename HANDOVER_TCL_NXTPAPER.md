@@ -8,6 +8,36 @@
 
 ---
 
+## 0. START HERE
+
+**The goal:** make the game run on the TCL 9469X tablet. It already runs well on the
+user's S24 Ultra — do not regress that (Success Criterion 3).
+
+**The situation in one paragraph:** the engine boots fully on the tablet and dies at
+D3D device creation, because the bundled DXVK 2.6 needs Vulkan 1.3 and the tablet's
+Mali-G57 driver only offers 1.1. A probe (Milestone 0, already done — §4) also proved
+the GPU has **no BC/DXT texture support at all**, which is a permanent ARM Mali
+hardware limitation that no driver update can fix, and Generals' textures are DXT.
+Those two facts together mean the fastest viable route is **SwiftShader** (software
+Vulkan 1.3, which also decodes BC), not a DXVK backport.
+
+**Your first day, in order:**
+1. Read §2 (device facts), §3 (exact failure), §4 M0 results. Don't re-derive them —
+   they were measured on the actual device, and `vkprobe.c` is in the repo if you want
+   to re-run the measurement yourself.
+2. Read §5 (**signing/device safety — violating these destroys the user's game data**).
+3. Start **Milestone 1**, and specifically the **M1 fast path** — it needs no build
+   toolchain, only tools already installed on this PC. Getting `libvk_swiftshader.so`
+   built for arm64 is the one genuinely hard step; everything after it is the
+   binary-patch/repack/sign workflow already proven in `WORKLOG.md`.
+4. Only set up the full build toolchain (§6 — CMake/Meson/Ninja/Gradle are all
+   **missing**) once the fast path proves SwiftShader works. Don't burn day 1 on it.
+
+**Ask the user before:** wiping any device data, changing device system settings, or
+committing to Milestone 2 (it's a multi-week research project — see the sequencing note).
+
+---
+
 ## 1. Context — what already works
 
 The port **runs stably on the user's Samsung S24 Ultra** (Adreno GPU, Vulkan 1.3). Getting there required fixes that are now in `main`:
@@ -30,7 +60,8 @@ Released as `v0.3-android` (APK asset on the GitHub release = the fully binary-p
 | adb serial | `987800005DB3824` |
 | SoC | MediaTek **MT8781** (Helio G99; platform `mt6789`) |
 | GPU | **ARM Mali-G57 MC2** (Valhall gen1), driver `r32p1-01eac0` |
-| **Vulkan** | **1.1 only** — `feature:android.hardware.vulkan.version=4198400` (0x401000); ICD at `/vendor/lib64/hw/mt6789/vulkan.mali.so` |
+| **Vulkan** | device **1.1.177** — measured driver-direct via `vkprobe` (§4 M0), *not* inferred from the framework flag; loader advertises 1.3.0 but the ICD caps the device. ICD at `/vendor/lib64/hw/mt6789/vulkan.mali.so` |
+| **textureCompressionBC** | **NO** — BC1/2/3 have zero format features. Permanent Mali hardware limit (§4 M0 Result 2). ETC2 + ASTC are supported. |
 | Android | 15 (SDK 35) |
 | Screen | 1440×2200 portrait-native, density 320 |
 | RAM | 8 GB |
@@ -135,10 +166,62 @@ Honest expectation: this is CPU rasterization on a Helio G99 (2×A76 + 6×A55). 
 roughly 10–25 FPS at reduced resolution, not a smooth 60. It proves the stack and
 gives the user something playable; it is not a performance solution.
 
-1. Obtain/build `libvk_swiftshader.so` for arm64 (from AOSP/SwiftShader repo, or extract from Chrome/an emulator image).
-2. The fbraz3-dxvk Android WSI loads the system `libvulkan.so`. Add an env/property-gated override so it `dlopen`s a bundled `libvk_swiftshader.so` instead (SwiftShader exports `vk_icdGetInstanceProcAddr`; you can loader-shim it or link its exported `vkGetInstanceProcAddr` directly — SwiftShader also ships a full libvulkan-compatible build target `swiftshader_libvulkan`, easiest to consume).
-3. Stage it in `jniLibs/arm64-v8a/`, rebuild, run.
-4. Expectation: menu + gameplay at low FPS (Helio G99 CPU). This validates every layer above Vulkan on this device (input, audio path, formats, lifecycle) and gives the user something playable immediately. Cap resolution via `GameData/Options.ini` → `Resolution = 1100 720` (or similar 3:2-ish) to keep software rasterization affordable; confirm the engine honors it (it does — `OptionPreferences::getResolution`).
+#### M1 fast path — no build toolchain required ⚡ (verified 2026-07-29)
+
+You do **not** need CMake/Meson/Gradle for a first proof-of-concept. DXVK loads
+Vulkan dynamically by name, so SwiftShader can be swapped in with the same
+binary-patch + repack + sign workflow this project has used throughout (all tooling
+for it is already present — see §6).
+
+Verified by inspecting `lib/arm64-v8a/libdxvk_d3d9.so` from `GeneralsZH-icon2-aligned.apk`:
+
+| what | where |
+|---|---|
+| `"libvulkan.so\0"` (the dlopen target) | **file offset `0x5361e`** |
+| `"libvulkan.so.1\0"` (desktop fallback, harmless) | file offset `0x5473b` |
+| confirms the mechanism | nearby log strings `"Vulkan: Found vkGetInstanceProcAddr in "` and `"Vulkan: vkGetInstanceProcAddr not ..."` |
+
+`libdxvk_d3d8.so` contains none of these — it goes through d3d9, so **patch d3d9 only**.
+
+Steps:
+1. **Get SwiftShader for arm64.** Build from https://github.com/google/swiftshader
+   (target `vk_swiftshader`, Android arm64 via the NDK toolchain file) or extract
+   `libvk_swiftshader.so` from an Android emulator system image / Chrome APK. It exports
+   the full Vulkan entry points including `vkGetInstanceProcAddr`, so DXVK needs no shim.
+2. **Rename it to a name ≤ 12 characters** so it fits the existing string slot —
+   e.g. `libvk_sw.so` (11 chars). Set the internal SONAME to match
+   (`patchelf --set-soname libvk_sw.so`, or via the build), otherwise the Android
+   linker may resolve it inconsistently.
+3. **Patch the 13 bytes at `0x5361e`** in `libdxvk_d3d9.so`: write `libvk_sw.so\0`
+   and NUL-pad to the original 13-byte span (`libvulkan.so\0`). Never write past it —
+   the next string begins immediately after.
+4. **Add `lib/arm64-v8a/libvk_sw.so` to the APK**, STORED/uncompressed like every other
+   `.so` (the app uses `extractNativeLibs=false`, so the linker maps it straight out of
+   the APK — it must stay uncompressed and 16 KB-aligned).
+5. `zipalign -f -P 16 4` → `apksigner` with `my-release-key.jks` (pass `android`) →
+   `adb install -r`. See §5.
+6. **Verify the swap actually took** before interpreting any result: run `vkprobe`
+   (§M0) — but note it links the *system* loader, so instead confirm from logcat that
+   DXVK found its entry point, and check `textureCompressionBC` now reads YES in DXVK's
+   own device log. If the device still reports Mali/1.1, the patch did not take effect.
+
+If this proof-of-concept renders, *then* do it properly in source (env/property-gated
+loader override in the fbraz3-dxvk Android WSI, staged into `jniLibs/arm64-v8a/`) so
+the S24 build keeps using the real driver — see Success Criterion 3.
+
+#### Tuning
+Cap resolution via `GameData/Options.ini` → `Resolution = 1100 720` (or similar) to keep
+software rasterization affordable; the engine honours it (`OptionPreferences::getResolution`).
+Also consider `TextureReduction = 2` and `ShellMapOn = No` (SagePatch.ini) to cut load.
+
+#### Known risks for M1
+- **`VK_KHR_android_surface` support.** SwiftShader must present to an `ANativeWindow`
+  for the swapchain to work at all. Verify early — if surface support is missing or
+  broken, M1 collapses and you fall back to M2.
+- SwiftShader is a *software* device: it reports `deviceType = CPU`. Check that neither
+  DXVK nor the engine rejects a non-GPU device (some code paths filter on device type).
+- Expect the `VK_SUBOPTIMAL_KHR` presenter issue from WORKLOG.md to be irrelevant here
+  (software swapchain), but re-check rather than assume.
 
 ### Milestone 2 — hardware path: DXVK 1.10.3 + d3d8→9 shim (1–2 weeks, the real port)
 DXVK **1.10.3** (last 1.x) runs on Vulkan 1.1-class devices. But the d3d8 frontend only exists in DXVK 2.x. Plan:
