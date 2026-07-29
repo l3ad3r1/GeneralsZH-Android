@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- GeneralsX @feature android-port 06/07/2026
-     Adaptive launcher icon placeholder. Replace with real art before any public
-     build (see ios project.yml for the iOS icon source). -->
+<!-- GeneralsX @feature android-port 07/29/2026
+     Launcher icon: the game's original GeneralsZH.ico emblem (raster, from the
+     PC install), padded into the adaptive-icon safe zone. See
+     drawable-xxxhdpi/ic_launcher_foreground.png and mipmap-*/ic_launcher.png
+     (legacy pre-API26 fallback) for the generated assets. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@drawable/ic_launcher_foreground"/>
