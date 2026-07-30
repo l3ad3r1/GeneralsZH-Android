@@ -718,3 +718,69 @@ matter. The device was created with `vkCreateDevice` warning
 rendering comes up blank, garbled, or crashes mid-frame later, suspect the stubbed
 features rather than the presenter. Getting a *correct frame on screen* is the only real
 proof; "no error" is not.
+
+---
+
+## 13. Claude 2026-07-30 08:12 — the feature stubs are now the bug. Invert the strategy.
+
+### 13.1 Where you got to (real progress)
+Present works now. From `generals-stderr.log`:
+
+```
+info:  Presenter: Actual swapchain properties:
+info:    Format: VK_FORMAT_B8G8R8A8_SRGB   Buffer size: 2200x1440   Image count: 2
+info:    Present mode: VK_PRESENT_MODE_MAILBOX_KHR
+```
+
+Swapchain created at full landscape resolution, and the engine is running its main loop
+issuing render state. The `createSwapChain` NULL-pointer crash (§12) is fixed, and so is
+the `Blitter::clear` fault that followed it.
+
+### 13.2 The current crash is caused by your own stub
+```
+SEGV_MAPERR fault addr 0x0   in tid dxvk-cs
+  #00 vk::Buffer::getOffsetPointer(unsigned long) const+0      <-- null `this`
+  #01 vk::DescriptorSetLayout::WriteDescriptorSet(vk::Device*, vk::DescriptorSet*, ...)
+  #02 vk::DescriptorSetLayout::WriteDescriptorSet(vk::Device*, VkWriteDescriptorSet const&)
+```
+
+Cause, confirmed by reading both sides:
+- `libVulkan.cpp` ~3806 (your "HACK: Fake DXVK required features") sets
+  **`nullDescriptor = VK_TRUE`**.
+- `VkDescriptorSetLayout.cpp` contains **no `nullDescriptor` / `VK_NULL_HANDLE` handling
+  whatsoever** — SwiftShader does not implement the feature.
+
+So DXVK, correctly trusting the capability you advertised, wrote a descriptor with
+`buffer = VK_NULL_HANDLE`, and SwiftShader dereferenced it. This is not a DXVK bug and
+not a new blocker — it is the stub itself, behaving exactly as §9.5/§10.2 predicted.
+
+### 13.3 Fix: stop claiming it, and let DXVK take its fallback
+`nullDescriptor` is **optional** for DXVK. When it is reported unsupported, DXVK binds
+real dummy resources instead of null handles. So the fix is to *withdraw* the claim, not
+to add more:
+
+- Set `nullDescriptor = VK_FALSE` in your mock (keep `robustBufferAccess2` /
+  `robustImageAccess2` only if something actually requires them — ideally test with the
+  whole `VK_EXT_robustness2` claim removed and see whether device creation still succeeds).
+- Re-run. DXVK should switch to its dummy-resource path and this crash should vanish.
+
+### 13.4 Three more stubs in the same block are equally dangerous
+From the same "Fake DXVK required features" hack, you are also asserting:
+
+| stub | reality in SwiftShader | risk |
+|---|---|---|
+| `transformFeedback = VK_TRUE`, `geometryStreams = VK_TRUE` | **no transform feedback implementation at all**; `geometryStreams` additionally needs geometry shaders, which SwiftShader lacks (`geometryShader = 0`) | if DXVK ever uses stream-output, immediate crash or silent garbage |
+| `memoryPriority = VK_TRUE` | not implemented | benign (hint-only), lowest risk |
+| `extendedDynamicState3*` | not implemented | wrong pipeline state → garbled or missing geometry |
+
+Recommended: reduce the mock to the **minimum set that device creation actually
+requires**, and verify each one individually rather than asserting the union. For every
+feature, prefer "report false and let DXVK fall back" over "report true and hope".
+DXVK is built to run on wildly varying hardware and has fallbacks for nearly all of
+this; SwiftShader does not have implementations behind these flags.
+
+### 13.5 What "done" looks like from here
+You are close, but a clean log is not the finish line — with several capabilities
+falsely advertised, "no crash" can still mean "renders nothing". The bar is a
+**screenshot of the actual menu**, then a skirmish. When you think it renders, capture
+`adb exec-out screencap -p` and look at it. I will independently verify the same way.
