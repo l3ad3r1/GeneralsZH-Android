@@ -28,12 +28,13 @@ This is the **first-ever DXVK build for Android**.
 | Device | GPU / driver | Renderer | Result |
 |---|---|---|---|
 | OnePlus Pad 2 | Adreno 830, Vulkan 1.3 | Current DXVK lane | Full gameplay verified |
-| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Main menu verified at 29–30 FPS, 2200×1440 |
+| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Full mission completed successfully; menu at 29–30 FPS |
 
 The TCL result was measured on physical hardware on 2026-07-30. Text, icons,
-colors, animated menu rendering, and touch input are correct. The Mali build is
-a technical preview: full skirmish/replay soak, suspend/resume, and memory-growth
-testing are still open.
+colors, animated menu rendering, touch input, and mission gameplay are correct.
+A complete mission was played without a crash or rendering failure. Extended
+replay, suspend/resume, thermal, and memory-growth testing remain useful
+follow-up coverage.
 
 ---
 
@@ -45,7 +46,7 @@ testing are still open.
    - **arm64-v8a** architecture (all modern tablets)
    - **Android 7.0+** (API 24+, for system Vulkan support)
    - A **Vulkan-capable GPU** (modern Adreno, or a supported Mali device using
-     the separate Mali preview APK)
+     the separate Mali APK)
    - **~3GB free RAM** for the game process
    - **~2.5GB storage** for game data
 
@@ -59,7 +60,7 @@ testing are still open.
 Grab the latest APK from the [**Releases page**](../../releases):
 
 - Use the normal Android APK for modern Adreno devices with Vulkan 1.3.
-- Use `GeneralsZH-TCL-Mali.apk` for Mali-G57-class devices limited to Vulkan
+- Use `GeneralsZH-TCL-Mali.apk` for tested Mali-G57-class devices limited to Vulkan
   1.1 and without BC/DXT texture support.
 
 ### Step 2: Install the APK
@@ -159,7 +160,7 @@ cmake --build build/android-game --target z_generals
 
 ### Mali legacy renderer
 
-The Mali preview uses two pinned upstream components:
+The Mali renderer uses two pinned upstream components:
 
 - `Joshua-Ashton/dxvk-native`, tag `native-1.9.2b`, commit
   `c8dc91fabd00cac11d697ccf07426e798393cd40`

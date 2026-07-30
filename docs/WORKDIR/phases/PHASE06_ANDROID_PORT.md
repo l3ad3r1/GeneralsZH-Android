@@ -1,8 +1,9 @@
 # Phase 6 — Android Tablet Port
 
-**Status:** Runtime proven on Adreno and Mali. TCL 9469X now reaches the Zero
-Hour menu through native Mali Vulkan using legacy DXVK at 29-30 FPS with
-software-decoded DXT textures; full gameplay and lifecycle validation remain.
+**Status:** Runtime and mission gameplay proven on Adreno and Mali. A complete
+Zero Hour mission now runs successfully on the TCL 9469X through native Mali
+Vulkan using legacy DXVK and software-decoded DXT textures. Extended replay,
+lifecycle, thermal, and memory validation remain.
 **Started:** 2026-07-06
 **Target:** Android tablets, arm64-v8a, landscape, minSdk 24 (Android 7.0+, native Vulkan).
 
@@ -79,6 +80,8 @@ The Mali device gate and full game both pass:
    and dynamic text.
 5. The in-game counter holds 29-30 FPS at 2200x1440, compared with roughly
    5-8 FPS through SwiftShader.
+6. A complete mission plays through successfully without a crash or rendering
+   failure on the TCL NXTPAPER 9469X.
 
 Two compatibility fixes were required beyond the Android/ARM64 WSI port:
 
