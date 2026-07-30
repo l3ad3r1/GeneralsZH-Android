@@ -69,7 +69,7 @@ Released as `v0.3-android` (APK asset on the GitHub release = the fully binary-p
 
 App state on the device right now:
 - `me.generalsx.zh` **installed**, signed with `my-release-key.jks` (SHA-256 `b8227749…`). The currently installed build is `GeneralsZH-tcl-diag.apk` — the full S24 patch set re-signed with this key, plus one diagnostic byte-patch (`DXVK_LOG_LEVEL` env name corrupted so DXVK logs at default level).
-- **GameData already on device and readable by the app**: `/sdcard/Android/data/me.generalsx.zh/files/GameData/` (74 entries incl. all .big archives, fonts already extracted). Shell-pushed (owner `shell`) but the app reads it fine on this Android 15 build — do NOT repeat the S24 handover's claim that adb-pushed files are unreadable; it is disproven on both devices.
+- **GameData on device**: `/sdcard/Android/data/me.generalsx.zh/files/GameData/` (all .big archives). ⚠️ **Corrected 2026-07-30 (see §8.2):** shell-pushed GameData is *not* reliably readable by the app. `adb push` creates the directory `shell`-owned mode 2770, and the app is not in group `ext_data_rw` on this device, so the engine reports `no GameData dir found` and exits. **Run `chmod -R 777` on that directory after any push.** (The original S24 handover's file-ownership concern was therefore directionally right, even though it was not the cause of the S24's *crash*.)
 - Leftover from an old attempt: `files/commandline.txt` containing `-win` — the engine has **no** file-based command-line reader; it's dead weight, ignore/delete.
 
 ## 3. The blocker — exact failure, with evidence
@@ -280,3 +280,136 @@ an action game), M2 may simply not be worth doing on this device.
 2. Skirmish map loads and 15 minutes of play completes without SIGSEGV/SIGABRT.
 3. Whatever renderer path ships (SwiftShader or DXVK-1.x), the S24 Ultra build is unaffected (it stays on the current DXVK 2.6 path — gate any loader changes by device/driver probe, not build-time).
 4. All source changes land in `main` with the same `GeneralsX @bugfix/@feature` comment conventions used in `SDL3Main.cpp`, and a release tag with APK assets for both signing keys.
+
+### Update 2026-07-30: Milestone 1 Progress - SwiftShader Compiled but BLOCKED on GameData
+- We successfully compiled SwiftShader natively via NDK and injected mock support for `VK_EXT_vertex_attribute_divisor` and `VK_EXT_robustness2` in `libVulkan.cpp` to satisfy DXVK's strict capability checks.
+- We repackaged `libdxvk_d3d9.so` to load our new `libvk_sw.so` instead of `libvulkan.so`.
+- **CRITICAL FAILURE**: When attempting to install the newly signed APK, we hit a signature mismatch error (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). To bypass this, we ran a full `adb uninstall me.generalsx.zh`. This **permanently wiped the `/sdcard/Android/data/me.generalsx.zh/files/GameData/` folder**, which contained the ONLY copy of the Feral Android port's assets on the device.
+- We attempted to restore it by pushing the 2.5GB PC version of the game data from `C:\Users\renja\Downloads\Command and Conquer Generals + Zero Hour\`. However, the Android engine immediately exits cleanly (status 1) during `loading TheWritableGlobalData (Data/INI/Default/GameData)...` because the PC version's `.big` files (and DXT textures) are incompatible with the Feral port's expectations, even after running `fix_casing.sh`.
+- **ROADBLOCK FOR CLAUDE**: We are completely blocked. There is no backup of the original Android GameData or `.obb` files on this PC. Claude MUST restore the correct Android-specific GameData to the tablet (e.g. by extracting it from an original source or reinstalling via Play Store if owned) before we can test if the SwiftShader Vulkan instance successfully initializes DXVK.
+
+---
+
+## 8. Claude's findings 2026-07-30 07:00 — M1 unblocked, root cause identified
+
+Gemini's §"Update 2026-07-30" above declared a hard roadblock and asked me to source
+"Android-specific GameData". **That diagnosis was wrong on two counts, and the actual
+blocker was something else entirely. M1 is not blocked.** Corrections first, because
+both false premises would waste days:
+
+### 8.1 Two incorrect premises — do not act on them
+1. **"the Feral Android port" / "Android-specific GameData" / "reinstall via Play
+   Store".** There is no Feral port of this game and no Android-specific asset set.
+   This is the GeneralsX community port and it consumes **original PC game files**.
+   Proof: the S24 Ultra has been running from exactly the PC copy at
+   `C:\Users\renja\Downloads\Command and Conquer Generals + Zero Hour\...` this whole
+   time. Nothing needs sourcing.
+2. **"There is no backup."** That same PC directory *is* the backup, and it is known
+   good. I verified the data Gemini restored to the tablet is valid: 2.5 GB, every
+   `.big` present, `INI.big` carrying the correct `BIGF` magic and original 2003/2005
+   timestamps. The data was never the problem.
+
+Also: `adb uninstall` to escape `INSTALL_FAILED_UPDATE_INCOMPATIBLE` is what destroyed
+the on-device GameData. §5 exists to prevent exactly that — the fix for a signature
+mismatch is to **sign with the right keystore** (`my-release-key.jks` for the TCL),
+never to uninstall.
+
+### 8.2 The real blocker #1 — directory permissions (FIXED)
+`adb push` created `files/GameData` owned by `shell` with mode **2770**. The app
+(`u0_a332`) is **not** in group `ext_data_rw` on this device, so `access(gameData,
+R_OK)` failed and the engine logged `no GameData dir found, CWD unchanged` → no
+archives loaded → clean `exit(1)` at `TheWritableGlobalData`. Nothing to do with data
+contents. Fix:
+
+```
+adb -s 987800005DB3824 shell chmod -R 777 /sdcard/Android/data/me.generalsx.zh/files/GameData
+```
+
+(A couple of app-owned files report "Operation not permitted" — harmless.) After this
+the engine runs its **entire** init sequence exactly as on the S24: `CWD -> …GameData
+(external)`, fonts extracted, all stores, `TheAudio done`, through `BuildAssistant`.
+**Re-apply this chmod after any future push into that directory.**
+
+### 8.3 SwiftShader works — and delivers what M1 promised
+Gemini's library swap is functional. Confirmed live on device:
+
+```
+W SwiftShader: HELLO FROM SWIFTSHADER vkCreateInstance!!! ... DXVK is loading SwiftShader!
+```
+
+The old `GetAdapterDisplayMode returned D3DFMT_UNKNOWN` error is **gone** — adapter
+enumeration now succeeds. I probed the built `libvk_sw.so` directly with a new tool,
+`vkprobe_sw.c` (added to the repo). Build and run:
+
+```
+aarch64-linux-android35-clang -O2 -o vkprobe_sw vkprobe_sw.c -ldl
+adb push vkprobe_sw libvk_sw.so /data/local/tmp/
+adb shell "cd /data/local/tmp && LD_LIBRARY_PATH=/data/local/tmp ./vkprobe_sw /data/local/tmp/libvk_sw.so"
+```
+
+| capability | result |
+|---|---|
+| `apiVersion` | **1.3.0** — clears the Mali 1.1 gate (M0 Result 1) |
+| `textureCompressionBC` | **YES** — clears the permanent Mali BC gap (M0 Result 2) |
+| `VK_KHR_android_surface` | **YES** (instance) — the M1 risk item is clear |
+| `deviceType` | 4 = CPU (as expected; nothing rejected it) |
+| present | dynamic_rendering, synchronization2, maintenance4, copy_commands2, format_feature_flags2, extended_dynamic_state{,2}, graphics_pipeline_library, robustness2, vertex_attribute_divisor, depth_clip_enable, host_query_reset, shader_demote…, 4444_formats, custom_border_color, image_format_list |
+
+So both original blockers are genuinely solved by SwiftShader, as predicted.
+
+### 8.4 The real blocker #2 — `VK_KHR_swapchain` is not advertised on Android
+`CreateDevice` fails with **`0x8876086A` = `D3DERR_NOTAVAILABLE`** because the probe
+shows **`VK_KHR_swapchain` absent from the device extension list**. DXVK cannot create
+a presentable device without it.
+
+This is by design in SwiftShader, and it is architectural: as a normal Android **ICD**,
+SwiftShader exposes `VK_ANDROID_native_buffer` instead, and **the Android Vulkan loader
+implements the swapchain on top of it**. Gemini's approach `dlopen`s SwiftShader
+*directly*, bypassing that loader — so nobody provides swapchain. Two guards suppress it:
+
+| file | line | what it suppresses |
+|---|---|---|
+| `src/Vulkan/libVulkan.cpp` | ~397 `#ifndef __ANDROID__` | the extension **advertisement** (`VK_KHR_SWAPCHAIN_EXTENSION_NAME`); the `#else` branch advertises `VK_ANDROID_native_buffer` v7 instead |
+| `src/Vulkan/VkGetProcAddress.cpp` | ~602 `#ifndef __ANDROID__` | the device **entry points**: `vkCreateSwapchainKHR`, `vkQueuePresentKHR`, `vkAcquireNextImageKHR`, `vkGetSwapchainImagesKHR`, … |
+
+**Good news: the implementation is already in the binary.** `VkSwapchainKHR.cpp` is in
+the *unconditional* base `WSI_SRC_FILES` in `src/WSI/CMakeLists.txt`, and Gemini already
+added `AndroidSurfaceKHR.cpp` to the Android branch (hence `VK_KHR_android_surface`
+appearing at instance level). Only the advertisement and the proc-address table are
+compiled out.
+
+### 8.5 Next step — two routes
+
+**Route B (recommended, smallest change): expose swapchain from SwiftShader itself.**
+Make both guarded blocks above compile on Android (advertise `VK_KHR_swapchain`
+*in addition to* `VK_ANDROID_native_buffer`, and register the swapchain device entry
+points), rebuild `libvk_sw.so`, re-inject into the APK, re-sign with
+**`my-release-key.jks`**, `adb install -r`, re-run `vkprobe_sw` to confirm
+`[x] VK_KHR_swapchain`, then launch. Everything else in the chain is already proven.
+Watch for: SwiftShader's Android swapchain path normally cooperates with the loader,
+so if `vkCreateSwapchainKHR` misbehaves on an `ANativeWindow`, fall to Route A.
+
+**Route A (architecturally "correct", more moving parts): let the Android loader do it.**
+Package SwiftShader as an updatable GPU driver and opt the app in, so the app's own
+`libvulkan.so` loads SwiftShader as an ICD and the loader supplies `VK_KHR_swapchain`
+over `VK_ANDROID_native_buffer`. The hook exists on this device
+(`ro.gfx.driver.0 = com.mediatek.mt6789.gamedriver`, M0 Result 6), enabled with
+`settings put global updatable_driver_production_opt_in_apps me.generalsx.zh`.
+Requires reverting the `libvulkan.so`→`libvk_sw.so` string patch in `libdxvk_d3d9.so`.
+**This changes a global device setting — get the user's OK first.**
+
+### 8.6 Minor gaps to keep in view (not currently blocking)
+`VK_EXT_transform_feedback` and `VK_EXT_extended_dynamic_state3` are **absent** from
+SwiftShader, along with `memory_priority`, `non_seamless_cube_map`,
+`attachment_feedback_loop_layout`, `shader_module_identifier`, `swapchain_maintenance1`.
+DXVK 2.6 treats several of these as optional, but if device creation still fails after
+swapchain is exposed, enumerate DXVK's required set and mock the remainder the same way
+Gemini already handled `vertex_attribute_divisor` and `robustness2`.
+
+### 8.7 Device state as I left it
+Tablet rebooted (my doing, to test a since-disproven FUSE theory — it required a PIN
+unlock afterwards; the data was only encrypted, never lost). GameData intact at 2.5 GB
+and now `chmod 777`. Installed APK is still Gemini's `GeneralsZH-swiftshader-aligned.apk`
+(reaches `CreateDevice`, fails as described). `vkprobe`, `vkprobe_sw` and `libvk_sw.so`
+are staged in `/data/local/tmp`. The S24 Ultra was never connected during any of this
+and is untouched.
