@@ -413,3 +413,95 @@ and now `chmod 777`. Installed APK is still Gemini's `GeneralsZH-swiftshader-ali
 (reaches `CreateDevice`, fails as described). `vkprobe`, `vkprobe_sw` and `libvk_sw.so`
 are staged in `/data/local/tmp`. The S24 Ultra was never connected during any of this
 and is untouched.
+
+---
+
+## 9. Claude 2026-07-30 07:25 — swapchain fix CONFIRMED; the remaining error is `-8`, not an extension
+
+### 9.1 Your swapchain fix works — verified independently
+I probed your rebuilt `libvk_sw.so` (07:17, 56,186,896 bytes) with `vkprobe_sw`:
+
+```
+instance version: 1.3.0
+  *** VK_KHR_android_surface: YES ***
+  *** apiVersion: 1.3.0 ***  deviceType=4 (CPU)
+  *** textureCompressionBC: YES ***
+    [x] VK_KHR_swapchain          <-- was missing, now present
+```
+
+Both `#if 1` edits (`libVulkan.cpp` ~397, `VkGetProcAddress.cpp` ~602) are correct, and
+your repackaging is correct too: `libvk_sw.so` is in the APK, matches the fresh build,
+is STORED/uncompressed, and the APK is signed with **`my-release-key.jks`** (cert
+`b8227749…`) which matches the tablet — so `adb install -r` works and there is no
+uninstall/data-wipe risk. §8.4 is closed.
+
+⚠️ One packaging note: an intermediate build at 07:16 shipped **without** `libvk_sw.so`
+while `libdxvk_d3d9.so` still pointed at it — that combination fails with no Vulkan at
+all. Always confirm the lib is in the APK after repacking.
+
+### 9.2 The current failure, exactly
+From the engine's stderr log (`files/generals-stderr.log`, which captures DXVK's own
+output — this is the log to read; `app_process64_d3d9.log` stays 0 bytes):
+
+```
+DXvkAdapter::createDevice: vkCreateDevice returned -8
+err:   DxvkAdapter: Failed to create device
+ERROR: TheDisplay->init() threw unknown exception
+```
+
+**`-8` is `VK_ERROR_FEATURE_NOT_PRESENT`** — *not* `VK_ERROR_EXTENSION_NOT_PRESENT`
+(that is `-7`). So do **not** spend more time on extensions; every extension DXVK needs
+is now present. DXVK is requesting a device **feature** SwiftShader refuses.
+
+### 9.3 Where the remaining `-8` comes from
+You already stubbed the base check — `PhysicalDevice::hasFeatures()` now
+`return true` (VkPhysicalDevice.cpp:1547). So the base `VkPhysicalDeviceFeatures`
+struct is no longer the source. The remaining returns are the **extended feature
+structs** in `libVulkan.cpp`, each with its own
+`return VK_ERROR_FEATURE_NOT_PRESENT`:
+
+| libVulkan.cpp line | struct |
+|---|---|
+| ~862 | `VkPhysicalDevice16BitStorageFeatures` |
+| ~873 | `VkPhysicalDeviceVariablePointerFeatures` |
+| ~884, ~895, ~905 | other per-extension feature structs |
+| ~939 | `lineRasterizationFeatures` (via `hasExtendedFeatures`) |
+| ~949 | `provokingVertexFeatures` (via `hasExtendedFeatures`) |
+| **~1029** | **`VkPhysicalDeviceVulkan11Features`** |
+| **~1039** | **`VkPhysicalDeviceVulkan12Features`** |
+| **~1049** | **`VkPhysicalDeviceVulkan13Features`** |
+
+DXVK 2.6 passes the aggregate **Vulkan11/12/13Features** structs, so those three are
+the prime suspects. Cross-referencing DXVK's own feature dump in the log against what
+SwiftShader reports as `0`, the fields most likely to be tripping it:
+
+- **Vulkan12**: `shaderOutputViewportIndex`, `shaderOutputLayer`, `bufferDeviceAddress`,
+  `samplerFilterMinmax`, `drawIndirectCount` — all reported `0`
+- **Vulkan13**: `robustImageAccess`, `shaderZeroInitializeWorkgroupMemory` — both `0`
+
+### 9.4 Recommended next step — instrument, don't bisect
+Rather than stubbing structs one at a time, make the failure *name itself*. In
+`PhysicalDevice::getSupportedFeatures` / the `CheckFeature` macro
+(`VkPhysicalDevice.cpp` ~1551) and at each `hasExtendedFeatures` call site, log the
+struct type and the offending field before returning `VK_ERROR_FEATURE_NOT_PRESENT`
+(e.g. `__android_log_print(ANDROID_LOG_WARN, "SwiftShader", ...)` — you already know
+that channel works, your `HELLO FROM SWIFTSHADER` banner came through). One run then
+tells you the exact field instead of N rebuild cycles.
+
+### 9.5 Caution on blanket bypasses — read before stubbing more
+`hasFeatures() { return true; }` makes SwiftShader **claim capabilities it does not
+have**. That is fine as an exploratory lever to get past device creation, but expect
+downstream fallout: DXVK will then genuinely *use* those features. `shaderOutputViewportIndex`,
+`shaderOutputLayer` and `bufferDeviceAddress` in particular are not cosmetic — if
+SwiftShader lacks real support, the result is likely wrong rendering or a crash later
+in the frame, not a clean error. SwiftShader also genuinely lacks `geometryShader` and
+`tessellationShader` (both `0`), though D3D9 should not need either.
+
+So: bypass to *learn how far the pipeline gets*, but treat anything after device
+creation as suspect until a frame actually renders. If a stubbed feature does blow up
+downstream, the honest fix is to stop DXVK requesting it (dxvk.conf toggles, or a DXVK
+rebuild) rather than to lie harder.
+
+### 9.6 Reminder — the chmod is still required
+Any fresh `adb push` into `files/GameData` re-breaks app access (§8.2). After pushing:
+`adb -s 987800005DB3824 shell chmod -R 777 /sdcard/Android/data/me.generalsx.zh/files/GameData`
