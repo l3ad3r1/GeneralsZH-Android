@@ -505,3 +505,61 @@ rebuild) rather than to lie harder.
 ### 9.6 Reminder — the chmod is still required
 Any fresh `adb push` into `files/GameData` re-breaks app access (§8.2). After pushing:
 `adb -s 987800005DB3824 shell chmod -R 777 /sdcard/Android/data/me.generalsx.zh/files/GameData`
+
+---
+
+## 10. Claude 2026-07-30 07:33 — the complete `-8` candidate set (bounded, measured)
+
+You are bisecting `VK_ERROR_FEATURE_NOT_PRESENT` by rebuild. Here is the whole search
+space, measured directly off your 07:17 `libvk_sw.so` with a new probe,
+`vkprobe_feat.c` (added to the repo; build/run exactly like `vkprobe_sw`). It chains
+`VkPhysicalDeviceVulkan11/12/13Features` into `vkGetPhysicalDeviceFeatures2` and prints
+every field SwiftShader reports as unsupported. **Any `-8` must be one of these 21
+fields** (or a field in a per-extension struct):
+
+**Core `VkPhysicalDeviceFeatures`** — `geometryShader`, `tessellationShader`,
+`dualSrcBlend`, `logicOp`, `multiViewport`, `shaderImageGatherExtended`,
+`pipelineStatisticsQuery`, `shaderStorageImageReadWithoutFormat`
+
+**Vulkan11Features** — `storageBuffer16BitAccess`,
+`uniformAndStorageBuffer16BitAccess`, `variablePointers`,
+`variablePointersStorageBuffer`, `shaderDrawParameters`
+
+**Vulkan12Features** — `drawIndirectCount`, `storageBuffer8BitAccess`, `shaderInt8`,
+`shaderFloat16`, `samplerFilterMinmax`, `shaderOutputViewportIndex`, `shaderOutputLayer`
+
+**Vulkan13Features** — `textureCompressionASTC_HDR` (only this one; everything else
+DXVK wants at 1.3 — `synchronization2`, `dynamicRendering`, `maintenance4`,
+`shaderDemoteToHelperInvocation`, `robustImageAccess`, `pipelineCreationCacheControl`,
+`privateData`, `subgroupSizeControl`, `shaderTerminateInvocation`,
+`shaderIntegerDotProduct`, `inlineUniformBlock`, `computeFullSubgroups`,
+`shaderZeroInitializeWorkgroupMemory` — **is supported**)
+
+47 of the fields checked are supported, so the gap is narrow. Note your core-struct
+stub (`hasFeatures() { return true; }`) already neutralises the first group as a
+*rejection* source, which means the live culprit is most likely in **Vulkan11Features
+or Vulkan12Features** (libVulkan.cpp ~1029 / ~1039).
+
+### 10.1 Most probable culprits for a D3D9 device
+Ranked by how likely DXVK's d3d9 backend requests them:
+1. **`shaderDrawParameters`** (vk11) — DXVK relies on draw parameters broadly
+2. **`dualSrcBlend`** (core) — D3D9 `D3DBLEND_BOTHSRCALPHA`/`BOTHINVSRCALPHA` map to it
+3. **`shaderImageGatherExtended`** (core) — texture-gather paths
+4. **`pipelineStatisticsQuery`** (core) — D3D9 `D3DQUERYTYPE_VERTEXSTATS`
+5. **`drawIndirectCount`**, **`shaderOutputViewportIndex`**, **`shaderOutputLayer`** (vk12)
+
+I have not read DXVK 2.6's exact requested set, so treat that ranking as a prior, not
+a fact — the instrumentation in §9.4 still beats guessing, and this list just bounds it.
+
+### 10.2 Honest caveat: some of these cannot be faked
+`geometryShader` and `tessellationShader` are **genuinely unimplemented** in SwiftShader,
+and `dualSrcBlend`, `logicOp`, `multiViewport` very likely are too. Reporting them as
+supported gets you past `vkCreateDevice` and then fails later — wrong output or a crash
+mid-frame, per §9.5.
+
+If it turns out DXVK *hard-requires* `geometryShader` or `dualSrcBlend`, that is a real
+ceiling on the SwiftShader route, not a stubbing problem. For a 2003 fixed-function-era
+D3D8/9 title neither should be needed for correct rendering, so DXVK requesting them
+would be incidental rather than load-bearing — but verify by getting a frame on screen,
+not by the absence of an error. Escalate to the user before investing days if the
+required set turns out to include something SwiftShader fundamentally cannot do.
