@@ -636,3 +636,85 @@ The `-8 VK_ERROR_FEATURE_NOT_PRESENT` analysis and the measured 21-field gap lis
 stand — they were taken from your *working* 07:17 library, before this corruption. Once
 `libmain.so` loads again you will be back at the `vkCreateDevice` question with that work
 intact. Your swapchain fix is still verified good (§9.1).
+
+---
+
+## 12. Claude 2026-07-30 08:00 — you recovered, device creation SUCCEEDS, and the main loop was reached
+
+Big milestone. Your 07:57 build (`test_update*.apk`) is clean — `libmain.so` back to
+13,661,680 with 5/5 `SDL_free` NOPs correctly aligned, `libvk_sw.so` bundled — and the
+run went far further than ever before:
+
+```
+W SwiftShader: HELLO FROM SWIFTSHADER vkCreateDevice!!! ...
+W SwiftShader: vkCreateDevice REACHED THE END! Returning SUCCESS!
+DXvkAdapter::createDevice: vkCreateDevice returned 0        <-- was -8
+I GeneralsX: GameMain: init() done, calling execute()...
+INFO: SDL3GameEngine::execute() - entering main loop
+warn:  D3D8Device::SetRenderState: Unimplemented render state D3DRS_PATCHSEGMENTS
+```
+
+The D3D device is created, the **entire UI is built** (all fonts loaded via FreeType,
+`Shell::doPush()` completed), and the engine **entered its main loop and began issuing
+render state**. §9/§10's `-8` problem is solved.
+
+### 12.1 New failure: NULL function pointer in the presenter
+It dies on the first present:
+
+```
+signal 11 (SIGSEGV), fault addr 0x0
+  #00 pc 0000000000000000  <unknown>                          <-- called a NULL pointer
+  #01 dxvk::Presenter::createSwapChain()+552
+  #02 dxvk::Presenter::recreateSwapChain()+68
+  #03 dxvk::Presenter::acquireNextImage(...)
+  #04 dxvk::D3D9SwapChainEx::PresentImage(...)
+  #05 dxvk::D3D9SwapChainEx::Present(...)
+```
+
+`#00 pc 0` means DXVK **called a function pointer it resolved to NULL** — not a bad
+argument, a missing entry point.
+
+### 12.2 Prime suspect: `VK_KHR_get_surface_capabilities2`
+SwiftShader advertises only **9 instance extensions** (measured with `vkprobe_sw`):
+`VK_KHR_device_group_creation`, `VK_KHR_external_fence_capabilities`,
+`VK_KHR_external_memory_capabilities`, `VK_KHR_external_semaphore_capabilities`,
+`VK_KHR_get_physical_device_properties2`, `VK_EXT_debug_utils`,
+`VK_EXT_headless_surface`, `VK_KHR_android_surface`, `VK_KHR_surface`.
+
+**`VK_KHR_get_surface_capabilities2` is absent** — and `libdxvk_d3d9.so` references it
+(it is in the binary's extension-name strings). Modern DXVK presenters query surface
+capabilities through `vkGetPhysicalDeviceSurfaceCapabilities2KHR`; if that resolves to
+NULL and is called unconditionally, you get precisely this crash at precisely this call
+site. Also absent and referenced by DXVK: `VK_EXT_surface_maintenance1`,
+`VK_EXT_swapchain_maintenance1`.
+
+Note the base (non-`2`) queries **are** registered unguarded in
+`VkGetProcAddress.cpp:145-149` (`vkGetPhysicalDeviceSurfaceCapabilitiesKHR`,
+`…SurfaceFormatsKHR`, `…SurfacePresentModesKHR`), and `vkCreateAndroidSurfaceKHR` is
+registered under `#ifdef __ANDROID__` at ~194. So the *base* surface path is fine — it
+is the `2` variant that is missing.
+
+### 12.3 How to confirm in one run, rather than guess
+Do not bisect. Find the actual NULL:
+- Easiest: in DXVK terms the call is inside `Presenter::createSwapChain`. Rather than
+  patch DXVK, **add the missing entry points to SwiftShader** and see if the crash moves.
+- `VK_KHR_get_surface_capabilities2` is a thin wrapper over the base queries:
+  `vkGetPhysicalDeviceSurfaceCapabilities2KHR` fills a
+  `VkSurfaceCapabilities2KHR{ surfaceCapabilities }` from the existing
+  `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`, and `…SurfaceFormats2KHR` likewise wraps
+  `…SurfaceFormatsKHR`. Advertise the instance extension, register the two entry points,
+  implement them as wrappers. That is a genuinely small, *honest* addition — unlike the
+  feature stubs, this implements real functionality rather than claiming absent support.
+- Alternatively confirm first by having SwiftShader log every
+  `vkGetInstanceProcAddr`/`vkGetDeviceProcAddr` miss (return-NULL path) with the
+  requested name. One run then names the function DXVK could not resolve. This is the
+  faster diagnostic and I recommend doing it first.
+
+### 12.4 Watch for this next (per §9.5)
+Once presenting works you are in territory where the earlier **feature stubs** start to
+matter. The device was created with `vkCreateDevice` warning
+`UNSUPPORTED: pCreateInfo->pNext sType = 1000190002`
+(`VK_EXT_vertex_attribute_divisor` features) — accepted only because it is stubbed. If
+rendering comes up blank, garbled, or crashes mid-frame later, suspect the stubbed
+features rather than the presenter. Getting a *correct frame on screen* is the only real
+proof; "no error" is not.
