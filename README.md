@@ -23,7 +23,17 @@ This is the **first-ever DXVK build for Android**.
 | Audio playback | ❌ OpenAL initializes but no sound yet |
 | Full gameplay session (skirmish) | ✅ |
 
-**Tested on:** OnePlus Pad 2 (Snapdragon 8 Gen 3, Adreno 830, 3392×2400)
+### Verified devices
+
+| Device | GPU / driver | Renderer | Result |
+|---|---|---|---|
+| OnePlus Pad 2 | Adreno 830, Vulkan 1.3 | Current DXVK lane | Full gameplay verified |
+| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Main menu verified at 29–30 FPS, 2200×1440 |
+
+The TCL result was measured on physical hardware on 2026-07-30. Text, icons,
+colors, animated menu rendering, and touch input are correct. The Mali build is
+a technical preview: full skirmish/replay soak, suspend/resume, and memory-growth
+testing are still open.
 
 ---
 
@@ -34,7 +44,8 @@ This is the **first-ever DXVK build for Android**.
 1. **An Android tablet** with:
    - **arm64-v8a** architecture (all modern tablets)
    - **Android 7.0+** (API 24+, for system Vulkan support)
-   - A **Vulkan-capable GPU** (Adreno 7xx+, Mali-G77+, or equivalent)
+   - A **Vulkan-capable GPU** (modern Adreno, or a supported Mali device using
+     the separate Mali preview APK)
    - **~3GB free RAM** for the game process
    - **~2.5GB storage** for game data
 
@@ -45,7 +56,11 @@ This is the **first-ever DXVK build for Android**.
 
 ### Step 1: Download the APK
 
-Grab the latest APK from the [**Releases page**](../../releases).
+Grab the latest APK from the [**Releases page**](../../releases):
+
+- Use the normal Android APK for modern Adreno devices with Vulkan 1.3.
+- Use `GeneralsZH-TCL-Mali.apk` for Mali-G57-class devices limited to Vulkan
+  1.1 and without BC/DXT texture support.
 
 ### Step 2: Install the APK
 
@@ -125,7 +140,7 @@ The touch input system maps touchscreen gestures to the RTS mouse semantics the
 
 ```bash
 # Clone
-git clone https://github.com/tarek369/GeneralsZH-Android.git
+git clone https://github.com/l3ad3r1/GeneralsZH-Android.git
 cd GeneralsZH-Android
 
 # Initialize the DXVK fork submodule
@@ -141,6 +156,24 @@ cmake --build build/android-game --target z_generals
 # The signed APK appears at:
 #   android/app/build/outputs/apk/release/app-release.apk
 ```
+
+### Mali legacy renderer
+
+The Mali preview uses two pinned upstream components:
+
+- `Joshua-Ashton/dxvk-native`, tag `native-1.9.2b`, commit
+  `c8dc91fabd00cac11d697ccf07426e798393cd40`
+- `crosire/d3d8to9`, commit
+  `6cdb8a82184898f1b9371e4c8412c2d33ebb7b51`
+
+Apply [`Patches/dxvk-native-1.9.2b-android-sdl3.patch`](Patches/dxvk-native-1.9.2b-android-sdl3.patch)
+and [`Patches/d3d8to9-android-arm64.patch`](Patches/d3d8to9-android-arm64.patch)
+to those exact revisions. The `android/mali-spike` module provides the D3D9 and
+D3D8 hardware gates used before packaging the full app.
+
+Mali GPUs do not expose the game's BC/DXT texture formats. The renderer reports
+those formats unavailable, allowing the existing engine path to decode DXT1,
+DXT3, and DXT5 textures to uploadable RGBA surfaces. No game assets are modified.
 
 For more details, see [`android.md`](android.md) — the complete engineering log
 of every bug found and fixed during the port.

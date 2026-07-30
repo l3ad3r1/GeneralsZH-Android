@@ -1,0 +1,720 @@
+diff --git a/include/native/wsi/native_sdl3.h b/include/native/wsi/native_sdl3.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..04c7f86c55ed9ac4f4f862ec0a868cfdfd6d8230
+--- /dev/null
++++ b/include/native/wsi/native_sdl3.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <cstdint>
++#include <windows.h>
++
++#include <SDL3/SDL.h>
++
++namespace dxvk::wsi {
++
++  inline SDL_Window* fromHwnd(HWND hWindow) {
++    return reinterpret_cast<SDL_Window*>(hWindow);
++  }
++
++  inline HWND toHwnd(SDL_Window* pWindow) {
++    return reinterpret_cast<HWND>(pWindow);
++  }
++
++  inline SDL_DisplayID fromHmonitor(HMONITOR hMonitor) {
++    return static_cast<SDL_DisplayID>(reinterpret_cast<uintptr_t>(hMonitor));
++  }
++
++  inline HMONITOR toHmonitor(SDL_DisplayID displayId) {
++    return reinterpret_cast<HMONITOR>(static_cast<uintptr_t>(displayId));
++  }
++
++}
+diff --git a/include/native/wsi/native_wsi.h b/include/native/wsi/native_wsi.h
+index 00a299060bf1a6ae30e16766ed450f5fd2e3650b..c5716cbc099cca937bb9476c14b40a919b2aa3c2 100644
+--- a/include/native/wsi/native_wsi.h
++++ b/include/native/wsi/native_wsi.h
+@@ -4,6 +4,8 @@
+ #error You shouldnt be using this code path.
+ #elif DXVK_WSI_SDL2
+ #include "wsi/native_sdl2.h"
++#elif DXVK_WSI_SDL3
++#include "wsi/native_sdl3.h"
+ #else
+ #error Unknown wsi!
+ #endif
+diff --git a/meson.build b/meson.build
+index 0b9a1185587cdcbd8eb4b333ba10d0b06641a081..1564584b325fce9fe2854a973038c22bc46f8bda 100644
+--- a/meson.build
++++ b/meson.build
+@@ -123,6 +123,10 @@ else
+   dxvk_wsi      = get_option('dxvk_native_wsi')
+   dxvk_platform = target_machine.system()
+ 
++  if dxvk_platform == 'android'
++    add_project_link_arguments('-llog', language : 'cpp')
++  endif
++
+   if cpu_family == 'x86'
+     if dxvk_compiler.has_argument('-msse') and dxvk_compiler.has_argument('-msse2')
+       add_project_arguments('-msse', '-msse2', language: 'c')
+@@ -141,7 +145,11 @@ else
+   else
+     dxvk_include_path = include_directories('./include', './include/native/', './include/native/windows', './include/native/directx')
+     lib_vulkan  = dxvk_compiler.find_library('vulkan')
+-    lib_sdl2    = dxvk_compiler.find_library('SDL2')
++    if dxvk_wsi == 'sdl3'
++      lib_sdl3 = dxvk_compiler.find_library('SDL3')
++    else
++      lib_sdl2 = dxvk_compiler.find_library('SDL2')
++    endif
+     wrc = find_program('echo')
+     so_prefix = 'libdxvk_'
+   endif
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index 7af7f51126e4b9a180d16e98c8e88c78449e82d5..8e03cfd07a815d80d36a01ee630b408d86b5f5db 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -3860,15 +3860,21 @@ namespace dxvk {
+     // SM1 level hardware
+     enabled.core.features.depthClamp = VK_TRUE;
+     enabled.core.features.depthBiasClamp = VK_TRUE;
+-    enabled.core.features.fillModeNonSolid = VK_TRUE;
++    enabled.core.features.fillModeNonSolid =
++      supported.core.features.fillModeNonSolid;
+     enabled.core.features.pipelineStatisticsQuery = supported.core.features.pipelineStatisticsQuery;
+     enabled.core.features.sampleRateShading = VK_TRUE;
+     enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
+-    enabled.core.features.shaderClipDistance = VK_TRUE;
+-    enabled.core.features.shaderCullDistance = VK_TRUE;
++    enabled.core.features.shaderClipDistance =
++      supported.core.features.shaderClipDistance;
++    enabled.core.features.shaderCullDistance =
++      supported.core.features.shaderCullDistance;
+ 
+-    // Ensure we support real BC formats and unofficial vendor ones.
+-    enabled.core.features.textureCompressionBC = VK_TRUE;
++    // GeneralsX @feature android-port 30/07/2026 Do not require native BC
++    // texture support on mobile GPUs. The Mali path expands DXT uploads to
++    // RGBA8 before creating the Vulkan image.
++    enabled.core.features.textureCompressionBC =
++      supported.core.features.textureCompressionBC;
+ 
+     enabled.extDepthClipEnable.depthClipEnable = supported.extDepthClipEnable.depthClipEnable;
+     enabled.extHostQueryReset.hostQueryReset = supported.extHostQueryReset.hostQueryReset;
+@@ -3877,7 +3883,8 @@ namespace dxvk {
+     enabled.core.features.occlusionQueryPrecise = VK_TRUE;
+ 
+     // SM3 level hardware
+-    enabled.core.features.multiViewport = VK_TRUE;
++    enabled.core.features.multiViewport =
++      supported.core.features.multiViewport;
+     enabled.core.features.independentBlend = VK_TRUE;
+ 
+     // D3D10 level hardware supports this in D3D9 native.
+diff --git a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
+index 673ac0462e529a78d082480c7225db32ffc45cd2..b7e4858dff25e0ee29fe3e2252235779cbb09734 100644
+--- a/src/d3d9/d3d9_swapchain.cpp
++++ b/src/d3d9/d3d9_swapchain.cpp
+@@ -894,7 +894,11 @@ namespace dxvk {
+     // Recreate swap chain if the previous present call failed
+     VkResult status = m_device->waitForSubmission(&m_presentStatus);
+ 
+-    if (status != VK_SUCCESS)
++    // GeneralsX @performance android-port 30/07/2026 Android's WSI may report
++    // a persistently suboptimal full-screen surface even when its extent is
++    // stable. Rebuilding the swapchain every frame is substantially worse
++    // than continuing to present to that valid swapchain.
++    if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
+       RecreateSwapChain(m_vsync);
+   }
+ 
+diff --git a/src/dxvk/dxvk_adapter.cpp b/src/dxvk/dxvk_adapter.cpp
+index 9db50ae4b1485c6c7bd29d4863c96519c9123e4e..85f9744c164b61936a3afb2d45bb4fe97c54a08e 100644
+--- a/src/dxvk/dxvk_adapter.cpp
++++ b/src/dxvk/dxvk_adapter.cpp
+@@ -469,8 +469,10 @@ namespace dxvk {
+       vr = m_vki->vkCreateDevice(m_handle, &info, nullptr, &device);
+     }
+ 
+-    if (vr != VK_SUCCESS)
++    if (vr != VK_SUCCESS) {
++      Logger::err(str::format("vkCreateDevice returned ", vr));
+       throw DxvkError("DxvkAdapter: Failed to create device");
++    }
+     
+     Rc<DxvkDevice> result = new DxvkDevice(instance, this,
+       new vk::DeviceFn(true, m_vki->instance(), device),
+diff --git a/src/dxvk/meson.build b/src/dxvk/meson.build
+index 71359110e62f41fbeab41cf91114dbeddf940a87..2efc05adef8e247d84787839c7e65a1a431ed38f 100644
+--- a/src/dxvk/meson.build
++++ b/src/dxvk/meson.build
+@@ -122,10 +122,16 @@ dxvk_src_sdl2 = [
+   'platform/dxvk_sdl2_exts.cpp'
+ ]
+ 
++dxvk_src_sdl3 = [
++  'platform/dxvk_sdl3_exts.cpp'
++]
++
+ if dxvk_wsi == 'win32'
+   dxvk_src += dxvk_src_win32
+ elif dxvk_wsi == 'sdl2'
+   dxvk_src += dxvk_src_sdl2
++elif dxvk_wsi == 'sdl3'
++  dxvk_src += dxvk_src_sdl3
+ else
+   error('Unknown platform for dxvk')
+ endif
+diff --git a/src/dxvk/platform/dxvk_sdl3_exts.cpp b/src/dxvk/platform/dxvk_sdl3_exts.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..782390b993541850f11ac80a87a5a25e5b35313d
+--- /dev/null
++++ b/src/dxvk/platform/dxvk_sdl3_exts.cpp
+@@ -0,0 +1,41 @@
++#include "../dxvk_platform_exts.h"
++
++#include <SDL3/SDL.h>
++#include <SDL3/SDL_vulkan.h>
++
++namespace dxvk {
++
++  DxvkPlatformExts DxvkPlatformExts::s_instance;
++
++  std::string_view DxvkPlatformExts::getName() {
++    return "SDL3 WSI";
++  }
++
++  DxvkNameSet DxvkPlatformExts::getInstanceExtensions() {
++    if (!SDL_Vulkan_LoadLibrary(nullptr))
++      throw DxvkError(str::format("SDL3 WSI: Failed to load Vulkan library: ", SDL_GetError()));
++
++    uint32_t extensionCount = 0;
++    const char* const* extensionNames = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
++    if (!extensionNames)
++      throw DxvkError(str::format("SDL3 WSI: Failed to get instance extensions: ", SDL_GetError()));
++
++    DxvkNameSet names;
++    for (uint32_t i = 0; i < extensionCount; i++)
++      names.add(extensionNames[i]);
++    return names;
++  }
++
++  DxvkNameSet DxvkPlatformExts::getDeviceExtensions(
++          uint32_t adapterId) {
++    return DxvkNameSet();
++  }
++
++  void DxvkPlatformExts::initInstanceExtensions() {
++  }
++
++  void DxvkPlatformExts::initDeviceExtensions(
++    const DxvkInstance* instance) {
++  }
++
++}
+diff --git a/src/util/log/log.cpp b/src/util/log/log.cpp
+index bddff02c496e3be607fb56922c56b99be3fb937d..46f227544768bffba7ada97b49f7ed906180c8ed 100644
+--- a/src/util/log/log.cpp
++++ b/src/util/log/log.cpp
+@@ -2,6 +2,10 @@
+ 
+ #include "../util_env.h"
+ 
++#if defined(__ANDROID__)
++#include <android/log.h>
++#endif
++
+ namespace dxvk {
+   
+   Logger::Logger(const std::string& file_name)
+@@ -68,6 +72,22 @@ namespace dxvk {
+       while (std::getline(stream, line, '\n')) {
+         std::cerr << prefix << line << std::endl;
+ 
++#if defined(__ANDROID__)
++        static constexpr int androidPriorities[] = {
++          ANDROID_LOG_VERBOSE,
++          ANDROID_LOG_DEBUG,
++          ANDROID_LOG_INFO,
++          ANDROID_LOG_WARN,
++          ANDROID_LOG_ERROR,
++        };
++        __android_log_print(
++          androidPriorities[static_cast<uint32_t>(level)],
++          "DXVK",
++          "%s%s",
++          prefix,
++          line.c_str());
++#endif
++
+         if (m_fileStream)
+           m_fileStream << prefix << line << std::endl;
+       }
+diff --git a/src/util/meson.build b/src/util/meson.build
+index dbaba3720ce0982b1f70aa9f87d1f929a674f577..e414107be6a36cc16f98691a0ffcbefc2c01584e 100644
+--- a/src/util/meson.build
++++ b/src/util/meson.build
+@@ -35,7 +35,7 @@ util_src_linux = [
+ 
+ if dxvk_platform == 'windows'
+   util_src += util_src_win32
+-elif dxvk_platform == 'linux'
++elif dxvk_platform == 'linux' or dxvk_platform == 'android'
+   util_src += util_src_linux
+ else
+   error('Unknown platform for util')
+diff --git a/src/util/platform/util_env_linux.cpp b/src/util/platform/util_env_linux.cpp
+index fe0534097981629801b92bf6864fe23a68e29a14..57b52695346b5031bccbb8f1c535c119d42a1231 100644
+--- a/src/util/platform/util_env_linux.cpp
++++ b/src/util/platform/util_env_linux.cpp
+@@ -21,7 +21,9 @@ namespace dxvk::env {
+ 
+ 
+   bool createDirectory(const std::string& path) {
++    if (path.empty())
++      return false;
+     return std::filesystem::create_directories(path);
+   }
+ 
+ }
+diff --git a/src/util/sync/sync_spinlock.h b/src/util/sync/sync_spinlock.h
+index 27157929f92a6bf8977631757d05cf3e18e21d2e..a04c79258a69a50e050465d2dc3427c6bed7f056 100644
+--- a/src/util/sync/sync_spinlock.h
++++ b/src/util/sync/sync_spinlock.h
+@@ -21,7 +21,13 @@ namespace dxvk::sync {
+   void spin(uint32_t spinCount, const Fn& fn) {
+     while (unlikely(!fn())) {
+       for (uint32_t i = 1; i < spinCount; i++) {
++        #if defined(DXVK_ARCH_X86)
+         _mm_pause();
++        #elif defined(DXVK_ARCH_ARM64)
++        __asm__ __volatile__ ("yield");
++        #else
++        #error "Pause/Yield not implemented for this architecture."
++        #endif
+         if (fn())
+           return;
+       }
+diff --git a/src/util/util_bit.h b/src/util/util_bit.h
+index 3c65c70df73e88a33929ad73b9573132d5adbad8..4bbd9204894d432034fa9b6c8cde08453ac084c5 100644
+--- a/src/util/util_bit.h
++++ b/src/util/util_bit.h
+@@ -1,6 +1,12 @@
+ #pragma once
+ 
+-#ifndef _MSC_VER
++#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
++#define DXVK_ARCH_X86
++#elif defined(__aarch64__) || defined(_M_ARM64)
++#define DXVK_ARCH_ARM64
++#endif
++
++#if defined(DXVK_ARCH_X86) && !defined(_MSC_VER)
+ #if defined(__WINE__) && defined(__clang__)
+ #pragma push_macro("_WIN32")
+ #undef _WIN32
+@@ -9,7 +15,7 @@
+ #if defined(__WINE__) && defined(__clang__)
+ #pragma pop_macro("_WIN32")
+ #endif
+-#else
++#elif defined(DXVK_ARCH_X86)
+ #include <intrin.h>
+ #endif
+ 
+@@ -55,7 +61,7 @@ namespace dxvk::bit {
+     return _tzcnt_u32(n);
+     #elif defined(__BMI__)
+     return __tzcnt_u32(n);
+-    #elif defined(__GNUC__) || defined(__clang__)
++    #elif defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__))
+     uint32_t res;
+     uint32_t tmp;
+     asm (
+@@ -65,6 +71,8 @@ namespace dxvk::bit {
+       : "=&r" (res), "=&r" (tmp)
+       : "r" (n));
+     return res;
++    #elif defined(__GNUC__) || defined(__clang__)
++    return n != 0 ? __builtin_ctz(n) : 32;
+     #else
+     uint32_t r = 31;
+     n &= -n;
+@@ -144,7 +152,7 @@ namespace dxvk::bit {
+   template<typename T>
+   bool bcmpeq(const T* a, const T* b) {
+     static_assert(alignof(T) >= 16);
+-    #if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
++    #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
+     auto ai = reinterpret_cast<const __m128i*>(a);
+     auto bi = reinterpret_cast<const __m128i*>(b);
+ 
+diff --git a/src/util/util_vector.h b/src/util/util_vector.h
+index 77cdf2942b010e55d3a2f41b757cce29a4c88261..c26996be2de834bbc8b34e0c60ed8b007cbc3659 100644
+--- a/src/util/util_vector.h
++++ b/src/util/util_vector.h
+@@ -150,12 +150,18 @@ namespace dxvk {
+   static_assert(sizeof(Vector4i) == sizeof(int)   * 4);
+ 
+   inline Vector4 replaceNaN(Vector4 a) {
++    #if defined(DXVK_ARCH_X86)
+     Vector4 result;
+     __m128 value = _mm_load_ps(a.data);
+     __m128 mask  = _mm_cmpeq_ps(value, value);
+            value = _mm_and_ps(value, mask);
+     _mm_store_ps(result.data, value);
+     return result;
++    #else
++    for (uint32_t i = 0; i < 4; i++)
++      a[i] = std::isnan(a[i]) ? 0.0f : a[i];
++    return a;
++    #endif
+   }
+ 
+ }
+diff --git a/src/wsi/meson.build b/src/wsi/meson.build
+index 6ab147bedbf416c157b02f5245db96c2f6d07ce7..fc7053bab7c4057ef9004843a3da4d4e35fbbf62 100644
+--- a/src/wsi/meson.build
++++ b/src/wsi/meson.build
+@@ -12,12 +12,22 @@ wsi_sdl2_src = [
+   'sdl2/wsi_window_sdl2.cpp',
+ ]
+ 
++wsi_sdl3_src = [
++  'sdl3/wsi_mode_sdl3.cpp',
++  'sdl3/wsi_monitor_sdl3.cpp',
++  'sdl3/wsi_presenter_sdl3.cpp',
++  'sdl3/wsi_window_sdl3.cpp',
++]
++
+ if dxvk_wsi == 'win32'
+   wsi_src  = wsi_win32_src
+   wsi_deps = []
+ elif dxvk_wsi == 'sdl2'
+   wsi_src  = wsi_sdl2_src
+   wsi_deps = [ lib_sdl2 ]
++elif dxvk_wsi == 'sdl3'
++  wsi_src  = wsi_sdl3_src
++  wsi_deps = [ lib_sdl3 ]
+ else
+   error('Unknown wsi')
+ endif
+diff --git a/src/wsi/sdl3/wsi_helpers_sdl3.h b/src/wsi/sdl3/wsi_helpers_sdl3.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..2755c44220791eb3f3ca0ba4b7180790a70efa66
+--- /dev/null
++++ b/src/wsi/sdl3/wsi_helpers_sdl3.h
+@@ -0,0 +1,25 @@
++#pragma once
++
++#include <SDL3/SDL.h>
++#include <SDL3/SDL_vulkan.h>
++
++#include "../wsi_monitor.h"
++
++namespace dxvk {
++
++  inline bool isDisplayValid(SDL_DisplayID displayId) {
++    if (!displayId)
++      return false;
++
++    int count = 0;
++    SDL_DisplayID* displays = SDL_GetDisplays(&count);
++    bool found = false;
++
++    for (int i = 0; displays && i < count; i++)
++      found |= displays[i] == displayId;
++
++    SDL_free(displays);
++    return found;
++  }
++
++}
+diff --git a/src/wsi/sdl3/wsi_mode_sdl3.cpp b/src/wsi/sdl3/wsi_mode_sdl3.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..afecd3f1001a69ed40e12a657699597c21883de1
+--- /dev/null
++++ b/src/wsi/sdl3/wsi_mode_sdl3.cpp
+@@ -0,0 +1,84 @@
++#include "../wsi_mode.h"
++
++#include "wsi_helpers_sdl3.h"
++
++#include <wsi/native_wsi.h>
++
++#include "../../util/util_string.h"
++#include "../../util/log/log.h"
++
++namespace dxvk::wsi {
++
++  static inline uint32_t roundToNextPow2(uint32_t num) {
++    if (num-- == 0)
++      return 0;
++
++    num |= num >> 1; num |= num >> 2;
++    num |= num >> 4; num |= num >> 8;
++    num |= num >> 16;
++    return ++num;
++  }
++
++  static inline void convertMode(const SDL_DisplayMode& mode, WsiMode* pMode) {
++    pMode->width        = uint32_t(mode.w);
++    pMode->height       = uint32_t(mode.h);
++    pMode->refreshRate  = WsiRational{ uint32_t(mode.refresh_rate * 1000.0f), 1000 };
++    pMode->bitsPerPixel = roundToNextPow2(SDL_BITSPERPIXEL(mode.format));
++    pMode->interlaced   = false;
++  }
++
++  bool getDisplayMode(
++          HMONITOR hMonitor,
++          uint32_t ModeNumber,
++          WsiMode* pMode) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    int count = 0;
++    SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(displayId, &count);
++    if (!modes || int(ModeNumber) >= count) {
++      SDL_free(modes);
++      return false;
++    }
++
++    convertMode(*modes[ModeNumber], pMode);
++    SDL_free(modes);
++    return true;
++  }
++
++  bool getCurrentDisplayMode(
++          HMONITOR hMonitor,
++          WsiMode* pMode) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayId);
++    if (!mode) {
++      Logger::err(str::format("SDL3 WSI: SDL_GetCurrentDisplayMode: ", SDL_GetError()));
++      return false;
++    }
++
++    convertMode(*mode, pMode);
++    return true;
++  }
++
++  bool getDesktopDisplayMode(
++          HMONITOR hMonitor,
++          WsiMode* pMode) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(displayId);
++    if (!mode) {
++      Logger::err(str::format("SDL3 WSI: SDL_GetDesktopDisplayMode: ", SDL_GetError()));
++      return false;
++    }
++
++    convertMode(*mode, pMode);
++    return true;
++  }
++
++}
+diff --git a/src/wsi/sdl3/wsi_monitor_sdl3.cpp b/src/wsi/sdl3/wsi_monitor_sdl3.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..44119237e3436d0e018245853292d0710311b4fd
+--- /dev/null
++++ b/src/wsi/sdl3/wsi_monitor_sdl3.cpp
+@@ -0,0 +1,60 @@
++#include "../wsi_monitor.h"
++
++#include "wsi_helpers_sdl3.h"
++
++#include <windows.h>
++#include <wsi/native_wsi.h>
++
++#include <sstream>
++
++namespace dxvk::wsi {
++
++  HMONITOR getDefaultMonitor() {
++    return enumMonitors(0);
++  }
++
++  HMONITOR enumMonitors(uint32_t index) {
++    int count = 0;
++    SDL_DisplayID* displays = SDL_GetDisplays(&count);
++    HMONITOR result = displays && int(index) < count
++      ? toHmonitor(displays[index])
++      : nullptr;
++    SDL_free(displays);
++    return result;
++  }
++
++  bool getDisplayName(
++          HMONITOR hMonitor,
++          WCHAR    (&Name)[32]) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    std::wstringstream nameStream;
++    nameStream << LR"(\\.\DISPLAY)" << displayId;
++    std::wstring name = nameStream.str();
++
++    std::memset(Name, 0, sizeof(Name));
++    name.copy(Name, name.length(), 0);
++    return true;
++  }
++
++  bool getDesktopCoordinates(
++          HMONITOR hMonitor,
++          RECT*    pRect) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    SDL_Rect rect = { };
++    if (!SDL_GetDisplayBounds(displayId, &rect))
++      return false;
++
++    pRect->left   = rect.x;
++    pRect->top    = rect.y;
++    pRect->right  = rect.x + rect.w;
++    pRect->bottom = rect.y + rect.h;
++    return true;
++  }
++
++}
+diff --git a/src/wsi/sdl3/wsi_presenter_sdl3.cpp b/src/wsi/sdl3/wsi_presenter_sdl3.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..58bcdc868f32b3cfff300fe6cd96b13b07ba2fcb
+--- /dev/null
++++ b/src/wsi/sdl3/wsi_presenter_sdl3.cpp
+@@ -0,0 +1,20 @@
++#include "../wsi_presenter.h"
++
++#include <SDL3/SDL.h>
++#include <SDL3/SDL_vulkan.h>
++
++#include <wsi/native_wsi.h>
++
++namespace dxvk::wsi {
++
++  VkResult createSurface(
++          HWND                hWindow,
++    const Rc<vk::InstanceFn>& vki,
++          VkSurfaceKHR*       pSurface) {
++    SDL_Window* window = fromHwnd(hWindow);
++    return SDL_Vulkan_CreateSurface(window, vki->instance(), nullptr, pSurface)
++      ? VK_SUCCESS
++      : VK_ERROR_OUT_OF_HOST_MEMORY;
++  }
++
++}
+diff --git a/src/wsi/sdl3/wsi_window_sdl3.cpp b/src/wsi/sdl3/wsi_window_sdl3.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..79dcb67b01a16719b47b95d61d0f78dde1284034
+--- /dev/null
++++ b/src/wsi/sdl3/wsi_window_sdl3.cpp
+@@ -0,0 +1,99 @@
++#include "../wsi_window.h"
++
++#include "wsi_helpers_sdl3.h"
++
++#include <windows.h>
++#include <wsi/native_wsi.h>
++
++#include "../../util/util_string.h"
++#include "../../util/log/log.h"
++
++namespace dxvk::wsi {
++
++  void getWindowSize(
++        HWND      hWindow,
++        uint32_t* pWidth,
++        uint32_t* pHeight) {
++    int w = 0;
++    int h = 0;
++    if (!SDL_GetWindowSizeInPixels(fromHwnd(hWindow), &w, &h))
++      Logger::err(str::format("SDL3 WSI: SDL_GetWindowSizeInPixels: ", SDL_GetError()));
++
++    if (pWidth)
++      *pWidth = uint32_t(w);
++    if (pHeight)
++      *pHeight = uint32_t(h);
++  }
++
++  void resizeWindow(
++          HWND             hWindow,
++          DxvkWindowState* pState,
++          uint32_t         Width,
++          uint32_t         Height) {
++    if (!SDL_SetWindowSize(fromHwnd(hWindow), int32_t(Width), int32_t(Height)))
++      Logger::err(str::format("SDL3 WSI: SDL_SetWindowSize: ", SDL_GetError()));
++  }
++
++  bool setWindowMode(
++          HMONITOR hMonitor,
++          HWND     hWindow,
++    const WsiMode* pMode,
++          bool     EnteringFullscreen) {
++    SDL_DisplayID displayId = fromHmonitor(hMonitor);
++    if (!isDisplayValid(displayId))
++      return false;
++
++    SDL_DisplayMode closestMode = { };
++    if (!SDL_GetClosestFullscreenDisplayMode(
++          displayId, pMode->width, pMode->height,
++          float(pMode->refreshRate.numerator) / float(pMode->refreshRate.denominator),
++          true, &closestMode)) {
++      Logger::err(str::format("SDL3 WSI: SDL_GetClosestFullscreenDisplayMode: ", SDL_GetError()));
++      return false;
++    }
++
++    if (!SDL_SetWindowFullscreenMode(fromHwnd(hWindow), &closestMode)) {
++      Logger::err(str::format("SDL3 WSI: SDL_SetWindowFullscreenMode: ", SDL_GetError()));
++      return false;
++    }
++    return true;
++  }
++
++  bool enterFullscreenMode(
++          HMONITOR         hMonitor,
++          HWND             hWindow,
++          DxvkWindowState* pState,
++          bool             ModeSwitch) {
++    if (!isDisplayValid(fromHmonitor(hMonitor)))
++      return false;
++
++    if (!SDL_SetWindowFullscreen(fromHwnd(hWindow), true)) {
++      Logger::err(str::format("SDL3 WSI: SDL_SetWindowFullscreen: ", SDL_GetError()));
++      return false;
++    }
++    return true;
++  }
++
++  bool leaveFullscreenMode(
++          HWND             hWindow,
++          DxvkWindowState* pState) {
++    if (!SDL_SetWindowFullscreen(fromHwnd(hWindow), false)) {
++      Logger::err(str::format("SDL3 WSI: SDL_SetWindowFullscreen: ", SDL_GetError()));
++      return false;
++    }
++    return true;
++  }
++
++  bool restoreDisplayMode(HMONITOR hMonitor) {
++    return isDisplayValid(fromHmonitor(hMonitor));
++  }
++
++  HMONITOR getWindowMonitor(HWND hWindow) {
++    return toHmonitor(SDL_GetDisplayForWindow(fromHwnd(hWindow)));
++  }
++
++  bool isWindow(HWND hWindow) {
++    return fromHwnd(hWindow) != nullptr;
++  }
++
++}

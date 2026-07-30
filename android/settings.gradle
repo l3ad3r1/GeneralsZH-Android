@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "GeneralsX-ZH-Android"
 include ':app'
+include ':mali-spike'

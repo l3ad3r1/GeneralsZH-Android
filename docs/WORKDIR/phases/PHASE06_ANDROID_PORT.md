@@ -1,6 +1,8 @@
 # Phase 6 — Android Tablet Port
 
-**Status:** Scaffolding in place. Runtime UNVERIFIED — the DXVK-on-Android spike is the gate.
+**Status:** Runtime proven on Adreno and Mali. TCL 9469X now reaches the Zero
+Hour menu through native Mali Vulkan using legacy DXVK at 29-30 FPS with
+software-decoded DXT textures; full gameplay and lifecycle validation remain.
 **Started:** 2026-07-06
 **Target:** Android tablets, arm64-v8a, landscape, minSdk 24 (Android 7.0+, native Vulkan).
 
@@ -59,6 +61,46 @@ every frame via DXVK on the Adreno 830 Vulkan driver.
 - DXVK SDL3 WSI `libSDL3.so.0` → `libSDL3.so` soname (Android ships unversioned).
 - **D3D8 present-params gotcha:** windowed mode requires `FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT` (0), not IMMEDIATE — otherwise `D3DERR_DRIVERINVALIDCALL` (0x8876086c). This applies to the game too (SDL3Main.cpp sets this correctly already via the engine's own defaults).
 
+### TCL Mali result (2026-07-30): legacy DXVK + software DXT decode
+
+The TCL 9469X cannot run the normal Android DXVK 2.6 lane: its Mali-G57 MC2
+driver exposes Vulkan 1.1.177 and no BC/DXT texture formats. A separate
+hardware lane now runs through DXVK Native 1.9.2b plus a 64-bit-safe
+`d3d8to9` frontend.
+
+The Mali device gate and full game both pass:
+
+1. D3D9 creates a device on the real Mali driver.
+2. D3D8 creates a device through `d3d8to9`.
+3. DXT1/3/5 capability queries return `D3DERR_NOTAVAILABLE`, causing
+   `Get_Valid_Texture_Format` and `DDSFileClass::Copy_Level_To_Surface` to
+   expand compressed game textures before upload.
+4. The animated Zero Hour menu renders with correct textures, colors, icons,
+   and dynamic text.
+5. The in-game counter holds 29-30 FPS at 2200x1440, compared with roughly
+   5-8 FPS through SwiftShader.
+
+Two compatibility fixes were required beyond the Android/ARM64 WSI port:
+
+- Do not request unsupported BC, non-solid fill, multi-viewport, shader clip,
+  or shader cull features when creating the Vulkan device.
+- Treat persistent `VK_SUBOPTIMAL_KHR` presentation as usable on Android so the
+  swapchain is not destroyed and rebuilt every frame.
+
+The D3D8 frontend also needs a D3DX-free full-surface `CopyRects` fallback for
+the engine's A4R4G4B4 dynamic font atlases. Its pointer-derived shader handles
+were replaced with a 32-bit handle map so the wrapper remains valid in the
+arm64 process.
+
+The reproducible source delta is tracked in:
+
+- `Patches/dxvk-native-1.9.2b-android-sdl3.patch`, based on DXVK Native
+  `native-1.9.2b` / `c8dc91fabd00cac11d697ccf07426e798393cd40`.
+- `Patches/d3d8to9-android-arm64.patch`, based on d3d8to9
+  `6cdb8a82184898f1b9371e4c8412c2d33ebb7b51`.
+- `android/mali-spike`, the D3D9 and D3D8 real-device gate.
+- `scripts/build/android/repack-mali-apk.py`, the preview packaging helper.
+
 ### The spike artifacts (reproducible)
 - `build/android-spike/dxvk-build/src/d3d8/libdxvk_d3d8.so` — the DXVK d3d8 library
 - `build/android-spike/harness/d3d8_clear.cpp` — the go/no-go test harness
@@ -104,17 +146,22 @@ every frame via DXVK on the Adreno 830 Vulkan driver.
 
 ## Not done (follow-up)
 
-1. **DXVK runtime spike** — build the d3d8 triangle harness, run on a device.
-   This is the go/no-go gate for the whole port.
-2. **ffmpeg** — disabled by default; vcpkg ffmpeg:arm64-android is broken (#33963).
+1. **TCL Mali productization** — move the pinned DXVK Native 1.9.2b and
+   `d3d8to9` patch sets into the normal Android build, then select the legacy
+   lane by product flavor or runtime capability.
+2. **TCL gameplay and correctness pass** — run skirmish/replay and
+   background/resume soak tests, verify every DXT conversion path, and measure
+   memory growth from expanded RGBA textures.
+3. **TCL render-scale control** — stop forcing a 2200x1440 backbuffer and add a
+   lower internal resolution option for heavier matches.
+4. **ffmpeg** — disabled by default; vcpkg ffmpeg:arm64-android is broken (#33963).
    Hand-build with the NDK standalone toolchain.
-3. **GameData asset delivery** — sideload-push to internal storage for now; an
+5. **GameData asset delivery** — sideload-push to internal storage for now; an
    OBB / first-run extraction pipeline is needed for a polished release.
-4. **Vulkan surface lifecycle on resume** — SDL3 has open bugs (#10279, #12957)
+6. **Vulkan surface lifecycle on resume** — SDL3 has open bugs (#10279, #12957)
    on Android resume; budget explicit surface teardown/recreation.
-5. **Memory characterization** — Android per-process caps (worse on Android 17's
+7. **Memory characterization** — Android per-process caps (worse on Android 17's
    MemoryLimiter) may bite the ~3GB-RSS engine; test on target hardware.
-6. **No APK has been built or run yet.**
 
 ## Open questions / risks
 

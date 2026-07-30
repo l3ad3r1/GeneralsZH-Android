@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GeneralsX @feature android-port 30/07/2026 Native Mali/DXVK gate. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.hardware.vulkan.level" android:required="true" />
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:version="0x00401000"
+        android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:extractNativeLibs="false"
+        android:hasCode="true"
+        android:label="GeneralsX Mali Spike"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <activity
+            android:name=".MaliSpikeActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

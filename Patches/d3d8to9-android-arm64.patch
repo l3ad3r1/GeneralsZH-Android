@@ -1,0 +1,297 @@
+diff --git a/source/d3d8.hpp b/source/d3d8.hpp
+index 20c90e4becab9be05c14e2491e7921f8cd0bdb10..c9559714d49e2a284ca99cac4f4dab81c4521f24 100644
+--- a/source/d3d8.hpp
++++ b/source/d3d8.hpp
+@@ -11,6 +11,14 @@
+ #define interface struct
+ #endif
+ 
++#ifndef DECLSPEC_UUID
++#define DECLSPEC_UUID(x)
++#endif
++
++#ifndef UNREFERENCED_PARAMETER
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#endif
++
+ interface DECLSPEC_UUID("1DD9E8DA-1C77-4D40-B0CF-98FEFDFF9512") IDirect3D8;
+ interface DECLSPEC_UUID("7385E5DF-8FE8-41D5-86B6-D7B48547B6CF") IDirect3DDevice8;
+ interface DECLSPEC_UUID("928C088B-76B9-4C6B-A536-A590853876CD") IDirect3DSwapChain8;
+diff --git a/source/d3d8to9.cpp b/source/d3d8to9.cpp
+index a81af347d47f878cd48f93e93f89e942a63038c5..e70f2a8fa6aff4ed1f129cac9eba32ee2738fb9c 100644
+--- a/source/d3d8to9.cpp
++++ b/source/d3d8to9.cpp
+@@ -59,7 +59,11 @@ extern "C" HRESULT WINAPI ValidatePixelShader(const DWORD* pPixelShader, const D
+ 	{
+ 		const size_t size = strlen(errorMessage) + 1;
+ 
++		#if defined(__ANDROID__)
++		*pErrorsString = (char*) malloc(size);
++		#else
+ 		*pErrorsString = (char*) HeapAlloc(GetProcessHeap(), 0, size);
++		#endif
+ 		if (*pErrorsString)
+ 		{
+ 			memcpy(*pErrorsString, errorMessage, size);
+@@ -112,7 +116,11 @@ extern "C" HRESULT WINAPI ValidateVertexShader(const DWORD* pVertexShader, const
+ 	{
+ 		const size_t size = strlen(errorMessage) + 1;
+ 
++		#if defined(__ANDROID__)
++		*pErrorsString = (char*) malloc(size);
++		#else
+ 		*pErrorsString = (char*) HeapAlloc(GetProcessHeap(), 0, size);
++		#endif
+ 		if (*pErrorsString)
+ 		{
+ 			memcpy(*pErrorsString, errorMessage, size);
+@@ -156,6 +164,9 @@ extern "C" IDirect3D8 *WINAPI Direct3DCreate8(UINT SDKVersion)
+ 		return nullptr;
+ 	}
+ 
++	// GeneralsX @feature android-port 30/07/2026 Android has no legacy D3DX
++	// runtime to load. The wrapper's built-in fallbacks cover the game path.
++	#if !defined(__ANDROID__)
+ 	// Load D3DX
+ 	if (!D3DXAssembleShader || !D3DXDisassembleShader || !D3DXLoadSurfaceFromSurface)
+ 	{
+@@ -183,6 +194,7 @@ extern "C" IDirect3D8 *WINAPI Direct3DCreate8(UINT SDKVersion)
+ 			}
+ 		}
+ 	}
++	#endif
+ 
+ 	return new Direct3D8(d3d);
+ }
+diff --git a/source/d3d8to9.hpp b/source/d3d8to9.hpp
+index f864ffb48534f2cfd0ab329b8af92215c9384295..9ee8b389571257bb7462c0bb0807e9a0f3875f67 100644
+--- a/source/d3d8to9.hpp
++++ b/source/d3d8to9.hpp
+@@ -6,10 +6,13 @@
+ #pragma once
+ 
+ #include <vector>
++#include <unordered_map>
+ #include <unordered_set>
+ #include "d3d8.hpp"
+ #include "interface_query.hpp"
+ 
++struct VertexShaderInfo;
++
+ class Direct3D8 : public IDirect3D8
+ {
+ 	Direct3D8(const Direct3D8 &) = delete;
+@@ -182,7 +185,9 @@ private:
+ 	DWORD ClipPlaneRenderState = 0;
+ 
+ 	// Store shader handles and state block tokens so they can be destroyed later to mirror D3D8 behavior
+-	std::unordered_set<DWORD> PixelShaderHandles, VertexShaderHandles, StateBlockTokens;
++	std::unordered_set<DWORD> PixelShaderHandles, StateBlockTokens;
++	std::unordered_map<DWORD, VertexShaderInfo *> VertexShaders;
++	DWORD NextVertexShaderHandle = 1;
+ 	unsigned int VertexShaderAndDeclarationCount = 0;
+ };
+ 
+diff --git a/source/d3d8to9_device.cpp b/source/d3d8to9_device.cpp
+index 7428beab7e5592417fb98a55989b8e646de89b4a..fc4648f7b944a328bdfc4cce8984d41d8dcc22a3 100644
+--- a/source/d3d8to9_device.cpp
++++ b/source/d3d8to9_device.cpp
+@@ -19,9 +19,13 @@ Direct3DDevice8::Direct3DDevice8(Direct3D8 *d3d, IDirect3DDevice9 *ProxyInterfac
+ {
+ 	ProxyAddressLookupTable = new AddressLookupTable(this);
+ 
++	#if defined(__ANDROID__)
++	IsPaletteSupported = false;
++	#else
+ 	const HDC hDC = GetDC(nullptr);
+ 	IsPaletteSupported = (::GetDeviceCaps(hDC, RASTERCAPS) & RC_PALETTE) != 0;
+ 	ReleaseDC(nullptr, hDC);
++	#endif
+ 
+ 	IsMixedVertexProcessingDevice = (BehaviorFlags & D3DCREATE_MIXED_VERTEXPROCESSING) != 0;
+ 
+@@ -498,6 +502,54 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::CopyRects(IDirect3DSurface8 *pSourceS
+ 		if (SourceDesc.Pool == D3DPOOL_MANAGED || DestinationDesc.Pool != D3DPOOL_DEFAULT)
+ 		{
+ 			hr = D3DERR_INVALIDCALL;
++			// GeneralsX @bugfix android-port 30/07/2026 Android has no D3DX
++			// runtime. Handle the full-surface, same-format upload used by the
++			// engine's dynamic font atlases with lock/copy/unlock.
++			const bool fullSurfaceCopy =
++				SourceRect.left == 0 && SourceRect.top == 0 &&
++				DestinationRect.left == 0 && DestinationRect.top == 0 &&
++				SourceRect.right == LONG(SourceDesc.Width) &&
++				SourceRect.bottom == LONG(SourceDesc.Height) &&
++				DestinationRect.right == LONG(DestinationDesc.Width) &&
++				DestinationRect.bottom == LONG(DestinationDesc.Height);
++			if (fullSurfaceCopy) {
++				D3DLOCKED_RECT sourceLock = { };
++				D3DLOCKED_RECT destinationLock = { };
++				const bool sourceLocked = SUCCEEDED(
++					pSourceSurfaceImpl->GetProxyInterface()->LockRect(
++						&sourceLock, nullptr, D3DLOCK_READONLY));
++				const bool destinationLocked = sourceLocked && SUCCEEDED(
++					pDestinationSurfaceImpl->GetProxyInterface()->LockRect(
++						&destinationLock, nullptr, 0));
++				if (destinationLocked) {
++					const size_t rowBytes = std::min(
++						size_t(std::abs(sourceLock.Pitch)),
++						size_t(std::abs(destinationLock.Pitch)));
++					for (UINT row = 0; row < SourceDesc.Height; row++) {
++						std::memcpy(
++							static_cast<char *>(destinationLock.pBits) +
++								row * destinationLock.Pitch,
++							static_cast<const char *>(sourceLock.pBits) +
++								row * sourceLock.Pitch,
++							rowBytes);
++					}
++					pDestinationSurfaceImpl->GetProxyInterface()->UnlockRect();
++					pSourceSurfaceImpl->GetProxyInterface()->UnlockRect();
++					hr = D3D_OK;
++
++					void *pContainer = nullptr;
++					if (SUCCEEDED(pDestinationSurfaceImpl->GetContainer(
++							IID_IDirect3DTexture9, &pContainer)) && pContainer) {
++						IDirect3DTexture9 *pTexture =
++							static_cast<IDirect3DTexture9 *>(pContainer);
++						pTexture->AddDirtyRect(nullptr);
++						pTexture->Release();
++					}
++				}
++				else if (sourceLocked) {
++					pSourceSurfaceImpl->GetProxyInterface()->UnlockRect();
++				}
++			}
+ 			if (D3DXLoadSurfaceFromSurface != nullptr)
+ 			{
+ 				if (SUCCEEDED(D3DXLoadSurfaceFromSurface(pDestinationSurfaceImpl->GetProxyInterface(), nullptr, &DestinationRect, pSourceSurfaceImpl->GetProxyInterface(), nullptr, &SourceRect, D3DX_FILTER_NONE, 0)))
+@@ -1595,13 +1647,13 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::CreateVertexShader(const DWORD *pDecl
+ 
+ 		if (SUCCEEDED(hr))
+ 		{
+-			// Since 'Shader' is at least 8 byte aligned, we can safely shift it to right and end up not overwriting the top bit
+-			assert((reinterpret_cast<DWORD>(ShaderInfo) & 1) == 0);
+-			const DWORD ShaderMagic = reinterpret_cast<DWORD>(ShaderInfo) >> 1;
+-
+-			*pHandle = ShaderMagic | 0x80000000;
+-
+-			VertexShaderHandles.insert(*pHandle);
++			// GeneralsX @bugfix android-port 30/07/2026 D3D8 shader handles
++			// are 32-bit values even in the native 64-bit build. Keep the
++			// pointer in a map rather than packing it into the handle.
++			do {
++				*pHandle = 0x80000000 | NextVertexShaderHandle++;
++			} while (*pHandle == 0x80000000 || VertexShaders.count(*pHandle));
++			VertexShaders.emplace(*pHandle, ShaderInfo);
+ 			VertexShaderAndDeclarationCount++;
+ 			if (ShaderInfo->Shader)
+ 			{
+@@ -1647,8 +1699,10 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::SetVertexShader(DWORD Handle)
+ 	}
+ 	else
+ 	{
+-		const DWORD handleMagic = Handle << 1;
+-		VertexShaderInfo *const ShaderInfo = reinterpret_cast<VertexShaderInfo *>(handleMagic);
++		const auto entry = VertexShaders.find(Handle);
++		if (entry == VertexShaders.end())
++			return D3DERR_INVALIDCALL;
++		VertexShaderInfo *const ShaderInfo = entry->second;
+ 
+ 		hr = ProxyInterface->SetVertexShader(ShaderInfo->Shader);
+ 		ProxyInterface->SetVertexDeclaration(ShaderInfo->Declaration);
+@@ -1679,7 +1733,8 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::DeleteVertexShader(DWORD Handle)
+ 	if ((Handle & 0x80000000) == 0)
+ 		return D3DERR_INVALIDCALL;
+ 
+-	if (VertexShaderHandles.erase(Handle) == 0)
++	const auto entry = VertexShaders.find(Handle);
++	if (entry == VertexShaders.end())
+ 		return D3DERR_INVALIDCALL;
+ 
+ 	if (CurrentVertexShaderHandle == Handle)
+@@ -1689,8 +1744,8 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::DeleteVertexShader(DWORD Handle)
+ 		CurrentVertexShaderHandle = 0;
+ 	}
+ 
+-	const DWORD HandleMagic = Handle << 1;
+-	VertexShaderInfo *const ShaderInfo = reinterpret_cast<VertexShaderInfo *>(HandleMagic);
++	VertexShaderInfo *const ShaderInfo = entry->second;
++	VertexShaders.erase(entry);
+ 
+ 	if (ShaderInfo->Shader != nullptr) 
+ 	{
+@@ -1737,8 +1792,10 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice8::GetVertexShaderFunction(DWORD Handle,
+ 	if ((Handle & 0x80000000) == 0)
+ 		return D3DERR_INVALIDCALL;
+ 
+-	const DWORD HandleMagic = Handle << 1;
+-	IDirect3DVertexShader9 *VertexShaderInterface = reinterpret_cast<VertexShaderInfo *>(HandleMagic)->Shader;
++	const auto entry = VertexShaders.find(Handle);
++	if (entry == VertexShaders.end())
++		return D3DERR_INVALIDCALL;
++	IDirect3DVertexShader9 *VertexShaderInterface = entry->second->Shader;
+ 
+ 	if (VertexShaderInterface == nullptr)
+ 		return D3DERR_INVALIDCALL;
+@@ -2383,9 +2440,9 @@ void Direct3DDevice8::ReleaseShadersAndStateBlocks()
+ 		DeletePixelShader(Handle);
+ 	}
+ 
+-	while (!VertexShaderHandles.empty())
++	while (!VertexShaders.empty())
+ 	{
+-		DWORD Handle = *VertexShaderHandles.begin();
++		DWORD Handle = VertexShaders.begin()->first;
+ 		DeleteVertexShader(Handle);
+ 	}
+ 
+diff --git a/source/d3d8types.cpp b/source/d3d8types.cpp
+index a89df23db50c3c37e85d891b922d7268fa58413b..730f6d19b95eedf1bfe437d86916b06ec2e166a7 100644
+--- a/source/d3d8types.cpp
++++ b/source/d3d8types.cpp
+@@ -6,6 +6,7 @@
+ #include "d3d8types.hpp"
+ #include <assert.h>
+ #include <algorithm>
++#include <cstring>
+ 
+ DWORD GetDepthStencilBitCount(D3DFORMAT Format)
+ {
+@@ -45,7 +46,7 @@ DWORD CalcDepthBias(DWORD ZBias, DWORD DepthBitCount)
+ 		DepthEpsilon = -1.0f / ((1 << 15) - 1);
+ 		break;
+ 	}
+-	float DepthBias = std::min(ZBias, 16UL) * DepthEpsilon;
++	float DepthBias = std::min(ZBias, DWORD(16)) * DepthEpsilon;
+ 	return *reinterpret_cast<DWORD*>(&DepthBias);
+ }
+ 
+@@ -110,7 +111,7 @@ static UINT CalcTextureSize(UINT Width, UINT Height, UINT Depth, D3DFORMAT Forma
+ 
+ void ConvertCaps(D3DCAPS9 &Input, D3DCAPS8 &Output)
+ {
+-	CopyMemory(&Output, &Input, sizeof(Output));
++	std::memcpy(&Output, &Input, sizeof(Output));
+ 
+ 	// Tell application that window mode is supported
+ 	Output.Caps2 |= D3DCAPS2_CANRENDERWINDOWED;
+@@ -123,7 +124,7 @@ void ConvertCaps(D3DCAPS9 &Input, D3DCAPS8 &Output)
+ 	// Set default vertex shader version to 1.1 for D3D8 compatibility
+ 	Output.VertexShaderVersion = D3DVS_VERSION(1, 1);
+ 	// D3D8 can only handle up to 256 for MaxVertexShaderConst
+-	Output.MaxVertexShaderConst = std::min(256ul, Input.MaxVertexShaderConst);
++	Output.MaxVertexShaderConst = std::min(DWORD(256), Input.MaxVertexShaderConst);
+ }
+ 
+ void ConvertVolumeDesc(D3DVOLUME_DESC &Input, D3DVOLUME_DESC8 &Output)
+@@ -214,8 +215,8 @@ void ConvertPresentParameters(D3DPRESENT_PARAMETERS8 &Input, D3DPRESENT_PARAMETE
+ 
+ void ConvertAdapterIdentifier(D3DADAPTER_IDENTIFIER9 &Input, D3DADAPTER_IDENTIFIER8 &Output)
+ {
+-	CopyMemory(Output.Driver, Input.Driver, MAX_DEVICE_IDENTIFIER_STRING);
+-	CopyMemory(Output.Description, Input.Description, MAX_DEVICE_IDENTIFIER_STRING);
++	std::memcpy(Output.Driver, Input.Driver, MAX_DEVICE_IDENTIFIER_STRING);
++	std::memcpy(Output.Description, Input.Description, MAX_DEVICE_IDENTIFIER_STRING);
+ 	Output.DriverVersion = Input.DriverVersion;
+ 	Output.VendorId = Input.VendorId;
+ 	Output.DeviceId = Input.DeviceId;
