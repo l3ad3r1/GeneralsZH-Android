@@ -563,3 +563,76 @@ D3D8/9 title neither should be needed for correct rendering, so DXVK requesting 
 would be incidental rather than load-bearing — but verify by getting a frame on screen,
 not by the absence of an error. Escalate to the user before investing days if the
 required set turns out to include something SwiftShader fundamentally cannot do.
+
+---
+
+## 11. ⛔ STOP — 2026-07-30 07:52: your `libmain.so` is CORRUPT. Fix this before anything else.
+
+You are about to chase a phantom. The build you installed at 07:49–07:52 cannot load its
+engine at all, and no amount of feature/extension work will change that. The device says
+so directly:
+
+```
+W System.err: dlopen failed: ".../lib/arm64-v8a/libmain.so"
+              .dynamic section header was not found
+```
+
+### 11.1 What happened
+Your patching step **inserted a byte** instead of overwriting one. Evidence:
+
+| check | known-good | your `test.apk` / `test-signed.apk` |
+|---|---|---|
+| `libmain.so` size | 13,661,680 | **13,661,681** (+1) |
+| bytes at `0x6550c0` | `1f2003d5` (a NOP) | `aa1f2003` |
+| bytes at `0x6550c**1**` | — | `1f2003d5` ← the same data, **shifted +1** |
+| all five `SDL_free` NOPs correctly aligned | 5/5 | **0/5** |
+
+The insertion is at approximately **`0x4d554d`**, inside the string right after
+`MapCache.ini` — a `; ///////…` comment that gained one extra `/`. Everything after that
+offset is displaced by one byte, so every offset recorded in the ELF headers now points
+one byte early. Hence `.dynamic` cannot be found and `dlopen` fails outright.
+
+**Consequences you would otherwise have misdiagnosed:**
+- `SDL_main` never runs → **zero `GeneralsX:` lines in logcat** (the process starts, shows
+  a splash, and does nothing). This is *not* a Vulkan, feature, or swapchain problem.
+- The five `SDL_free` NOPs — the fix for the original launch-crash — are **inactive**,
+  because they moved. Even if the ELF loaded, the Scudo double-free would return.
+
+### 11.2 The rule you broke, and the rule to follow
+Every binary patch in this project must be **length-preserving**. Overwrite bytes in
+place; never insert, never append. If a replacement string is shorter than the original,
+pad the remainder with NUL (`\0`) up to the original length — that is exactly how the
+`res/Qr.xml` → `res/Qr.png` and `libvulkan.so` → `libvk_sw.so` patches were done safely
+(§8.4, and the icon work in the git history). A patch that changes file length shifts
+every subsequent ELF offset and destroys the binary.
+
+Sanity check to run after **every** patch, before packaging:
+
+```
+python -c "import sys;a=open(sys.argv[1],'rb').read();b=open(sys.argv[2],'rb').read();
+print('len', len(a), len(b), 'OK' if len(a)==len(b) else 'CORRUPT -- length changed')"
+```
+
+### 11.3 Recovery
+1. Discard the `libmain.so` you have been mutating. Take a fresh copy from a
+   known-good APK — **`GeneralsZH-icon2-aligned.apk`** (verified: 13,661,680 bytes, 5/5
+   `SDL_free` NOPs aligned, icon fix applied) or `GeneralsZH-tcl-diag.apk` if you want
+   DXVK logging left on.
+2. Re-apply only length-preserving edits, verifying size after each.
+3. Also fix these two regressions in the same rebuild:
+   - **9 resources are missing** from `test.apk` (`res/9N.9.png`, `res/Tl.xml`,
+     `res/Gt.9.png`, `res/YG.9.png`, `res/X3.9.png`, `res/GR.xml`, `res/aR.png`,
+     `res/QZ.xml`, …). `apksigner verify` fails with
+     *"res/9N.9.png entry referenced by META-INF/MANIFEST.MF not found"*. Your repack is
+     dropping entries — copy **every** entry from the source APK, and drop only
+     `META-INF/*` signature files.
+   - `res/Qr.xml` is back, meaning the launcher-icon fix was lost. Rebuild from
+     `GeneralsZH-icon2-aligned.apk` and it comes along for free.
+4. Verify before installing: correct `libmain.so` length, 5/5 NOPs aligned,
+   `libvk_sw.so` present and STORED, and `apksigner verify` **passes**.
+
+### 11.4 Nothing about §9/§10 is invalidated
+The `-8 VK_ERROR_FEATURE_NOT_PRESENT` analysis and the measured 21-field gap list still
+stand — they were taken from your *working* 07:17 library, before this corruption. Once
+`libmain.so` loads again you will be back at the `vkCreateDevice` question with that work
+intact. Your swapchain fix is still verified good (§9.1).
