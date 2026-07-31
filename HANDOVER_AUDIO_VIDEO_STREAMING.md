@@ -201,3 +201,181 @@ worth checking once the audio side is understood.
 - Every binary patch must be length-preserving (pad with NUL, never grow a file) —
   see the corrupted-`libmain.so` incident in `HANDOVER_TCL_NXTPAPER.md` §11 if you
   end up doing any binary-level work instead of a full rebuild.
+
+---
+
+## 8. ⛔ BUILD GUARD — read before producing any APK (added 2026-07-31)
+
+**A rebuild attempt on 2026-07-31 produced an APK that crashed on launch and was
+installed to the user's tablet, replacing the working `v0.4-mali` build.** The source
+changes were fine; **the packaging was the failure.** Do not repeat it.
+
+### 8.1 What went wrong
+A stock `./gradlew assembleDebug` was used. That does **not** reproduce the Mali build.
+Comparing the broken APK against the known-good `v0.4-mali` release:
+
+| library | `v0.4-mali` (works) | broken debug build |
+|---|---|---|
+| `libdxvk_d3d9.so` | **2,639,136** (DXVK Native 1.9.2b) | **37,704,720** (DXVK **2.6**) |
+| `libdxvk_d3d8.so` | 1,089,640 (d3d8to9) | 6,217,104 (DXVK 2.6) |
+| `libavcodec/avformat/avutil/swresample/swscale.so` | **all 5 present** | **all 5 MISSING** |
+| `libmain.so` | 13,661,680 (release) | 21,632,168 (debug) |
+| `libfreetype.so` | `libfreetype.so` | `libfreetyped.so` (debug variant) |
+
+Two fatal consequences:
+1. **DXVK 2.6 requires Vulkan 1.3. The Mali-G57 driver only offers 1.1.** This is the
+   original blocker this entire port exists to solve (§`HANDOVER_TCL_NXTPAPER.md` §4).
+   Shipping DXVK 2.6 to this device guarantees the renderer cannot initialise.
+2. **All five FFmpeg libraries were dropped** — which are precisely the libraries
+   responsible for decoding the music/speech/video this document is about.
+
+Observed crash: `SIGSEGV` at `StringClass::str()+12` called from
+`DX8Wrapper::Set_Render_Device+380` — consistent with D3D device creation returning
+null/empty after DXVK failed to find a usable Vulkan 1.3 device.
+
+### 8.2 Misdiagnosis to NOT repeat
+The crash was attributed to the engine being unable to find `GameData`, and
+`patch_lib_cwd.py` was run to inject a `/sdcard/GZH` path into `libmain.so`. **Both
+premises are false:**
+- **`/sdcard/GZH` does not exist on this device.** Verified: `ls /sdcard/GZH` →
+  `No such file or directory`. It is a dead path from an abandoned experiment weeks ago.
+- **GameData resolution was never broken.** The crash log from that very build shows
+  `CWD -> /storage/emulated/0/Android/data/me.generalsx.zh/files/GameData (external)`
+  succeeding, followed by archives loading and the engine running its full init
+  sequence. The crash happened *much later*, in renderer setup.
+
+The real GameData path is, and remains,
+`/sdcard/Android/data/me.generalsx.zh/files/GameData` (80 entries). **Never run
+`patch_lib_cwd.py` / `patch_lib.py` / `patch_zip.py`** — those are dead scripts from
+the first debugging session and will corrupt a working binary.
+
+### 8.3 Mandatory pre-install checklist
+Before `adb install` of any build, verify **all** of these. Any mismatch = do not install.
+
+```bash
+# 1. libmain.so must be release-sized, not debug-sized
+#    (13,661,680 for the current release lineage; debug builds land ~21 MB)
+# 2. DXVK must be the Native 1.9.2b pair, NOT DXVK 2.6
+#    libdxvk_d3d9.so ~2.6 MB   (NOT ~37 MB)
+#    libdxvk_d3d8.so ~1.1 MB   (NOT ~6.2 MB)
+# 3. All five FFmpeg libs must be present:
+#    libavcodec.so libavformat.so libavutil.so libswresample.so libswscale.so
+# 4. Signing cert must match the device:
+#    b82277491a6e25094ab2521b32e7728f4e9eb165cb950f544badfcf4564a5374
+```
+
+One-shot verification (adjust the APK path):
+
+```bash
+python -c "
+import zipfile,sys
+z=zipfile.ZipFile(sys.argv[1]); n=set(z.namelist())
+need=['libavcodec.so','libavformat.so','libavutil.so','libswresample.so','libswscale.so']
+miss=[x for x in need if 'lib/arm64-v8a/'+x not in n]
+d9=z.getinfo('lib/arm64-v8a/libdxvk_d3d9.so').file_size
+main=z.getinfo('lib/arm64-v8a/libmain.so').file_size
+print('MISSING ffmpeg libs:', miss or 'none  OK')
+print('libdxvk_d3d9.so:', d9, '->', 'OK (Native 1.9.2b)' if d9 < 5_000_000 else 'FAIL: this is DXVK 2.6, cannot work on Mali')
+print('libmain.so:', main, '->', 'OK (release)' if main < 16_000_000 else 'WARN: debug-sized build')
+" YOUR.apk
+```
+
+Then confirm on-device after install (this build logs its DXVK version at startup):
+
+```
+adb logcat -d | grep -a 'DXVK: v'      # MUST read: DXVK: v1.9.2
+```
+
+### 8.4 The correct packaging path
+`v0.4-mali` was produced by staging the pre-built Mali runtime libraries into
+`android/app/src/main/jniLibs/arm64-v8a/` (DXVK Native 1.9.2b + d3d8to9 + the five
+FFmpeg libs), *then* packaging — see `scripts/build/android/repack-mali-apk.py` and
+`docs/WORKDIR/phases/PHASE06_ANDROID_PORT.md` (TCL Mali section). Gradle's own
+`externalNativeBuild` does not produce or stage these. If you rebuild `libmain.so`
+from source, you must **keep the existing Mali runtime `.so` set alongside it**, not
+regenerate it.
+
+### 8.5 Recovery (already performed)
+The working build was restored by reinstalling the verified `v0.4-mali` APK
+(`GeneralsZH-TCL-Mali.apk`, SHA-256
+`b2d5de434ae9eea751210dcf0cc1c5451aa74f86f76d860196d0d7816e37a2e4`) with
+`adb install -r`. Certificates matched, so **no uninstall was needed and GameData was
+never at risk** (verified 80/80 entries before and after). Confirmed working
+afterwards: `DXVK: v1.9.2`, swapchain created, empty crash buffer, live skirmish at a
+locked 30 FPS.
+
+---
+
+## 9. Status of §2/§3 findings as of 2026-07-31
+
+**Nothing in §2 or §3 has been solved.** No diagnostic build ever reached the device
+(the only attempt is the broken one described in §8), so none of the candidates could
+be tested. Everything ruled out in §2 stays ruled out; both live candidates in §3
+remain open and untested.
+
+### 9.1 Genuinely useful progress that DOES exist (keep this work)
+The uncommitted working tree contains real progress toward the diagnostic build
+recommended in §4 — this is worth keeping, it just was never successfully packaged:
+- `CMakeLists.txt` — `add_compile_definitions(RELEASE_DEBUG_LOGGING)` added. This is
+  exactly the flag §4 called for, so **`DEBUG_LOG` output should now compile in**.
+- `cmake/compilers.cmake` — `-Wsuggest-override` disabled (it breaks this NDK).
+- `android/app/build.gradle` — `ndkVersion` bumped `27.1.12297006` → `28.2.13676358`
+  to match the NDK actually installed on this PC.
+- Several one-line fixes to `DEBUG_LOG` call sites that only fail to compile once
+  logging is enabled (`StdLocalFileSystem.cpp`, `udp.cpp`, `GameResultsThread.cpp`,
+  `AIPathfind.cpp`, `ScriptEngine.cpp`, `textureloader.cpp`, `GameClient.cpp`).
+- `Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp` — an
+  `fprintf(stderr, ...)` trace at the top of `init()`. Note this uses `fprintf`
+  rather than `DEBUG_LOG`, so it survives regardless of the logging flag.
+- `GeneralsMD/Code/Main/SDL3Main.cpp` — `setenv("ALSOFT_LOGLEVEL", "3", 1)`, which
+  raises openal-soft's own log verbosity. Useful (see §9.2).
+
+**None of it hardcodes `/sdcard/GZH`** — verified by grepping every tracked diff. The
+source tree is clean; only the packaging was wrong.
+
+### 9.2 NEW finding: OpenAL is leaking in-use buffers (not previously recorded)
+Running the restored `v0.4-mali` build during live gameplay, logcat shows a continuous
+flood of openal-soft errors:
+
+```
+W openal  : [ALSOFT] (WW) Error generated on context 0x…, code 0xa004,
+            "Deleting in-use buffer 662"
+```
+
+`0xa004` is `AL_INVALID_OPERATION`. Buffer IDs climb steadily (660→679 in ~10 s), so
+this happens many times per second throughout normal play.
+
+**Practical tip for whoever picks this up:** the log tag is lowercase **`openal`**.
+Grepping for `OpenAL` (as the earlier investigation did) misses all of it — which is
+why this was not found sooner. Use `adb logcat -d | grep -a openal`.
+
+**Mechanism**, from `OpenALAudioCache.cpp:228 releaseOpenAudioFile()`:
+```cpp
+if (fileToRelease->m_openCount > 0) {
+    TheAudio->closeAnySamplesUsingFile(...);   // meant to stop sources first
+}
+...
+if (fileToRelease->m_buffer) {
+    alDeleteBuffers(1, &fileToRelease->m_buffer);   // <-- rejected: still in use
+}
+fileToRelease->m_buffer = 0;                        // <-- handle dropped anyway
+```
+`alDeleteBuffers` fails (source still bound), but the handle is zeroed and the caller
+decrements `m_currentlyUsedSize` regardless. So the buffer **leaks inside OpenAL**
+while the cache's own accounting believes it was freed. `closeAnySamplesUsingFile()`
+is evidently not reliably detaching/stopping the source first.
+
+**Honest caveat:** this is a real, directly-observed defect, but it is **not proven**
+to be the cause of the silent music/voice — short SFX still play correctly despite it.
+It is worth fixing on its own merits, and it may well be contributory (a cache whose
+size accounting drifts will make wrong eviction decisions, and
+`getBufferForFile()` returns `0` — i.e. silence — whenever
+`freeEnoughSpaceForSample()` fails). Investigate alongside §3.
+
+### 9.3 Video: partially contradicts the §5 symptom
+§5 recorded, from the user, that loading-screen video does not animate. On the
+restored build I captured two screenshots 2 s apart during an in-engine cinematic and
+they **differ**, i.e. that scene animates fine. That scene may be an in-engine 3D
+sequence rather than an FFmpeg-decoded video, so this does **not** clear §5 — but the
+"video is frozen" symptom should be re-confirmed against a specific, known `.bik`/
+FFmpeg-backed cutscene before time is spent on it, and the two cases distinguished.
