@@ -8,12 +8,21 @@
 
 ## 0. START HERE
 
+> **⚠️ UPDATE 2026-07-31 — read §10 and §8 first.**
+> - **The video half is SOLVED (root-caused): the Android FFmpeg build ships no Bink
+>   demuxer/decoders, and every video in this game is `.bik`.** Fix is a build-config
+>   change — see **§10**.
+> - **These are TWO independent bugs, not one.** §1 below argues they share a root
+>   cause; **§10.3 disproves that for video.** The audio half is still open.
+> - **A rebuild broke the working APK once already. Read the build guard in §8 before
+>   producing any APK.**
+
 **Symptom, precisely:** on real hardware, with the user actually playing —
 - ✅ UI clicks and menu sounds play
 - ✅ SFX (explosions, gunfire, unit acknowledgment blips) play
-- ❌ Background/menu music is silent
-- ❌ Unit voice lines and EVA announcer are silent
-- ❌ Mission-briefing / loading-screen video does not animate (may show a static frame — see §5)
+- ❌ Background/menu music is silent — **still open**, see §3
+- ❌ Unit voice lines and EVA announcer are silent — **still open**, see §3
+- ❌ Mission-briefing / loading-screen video does not animate — **✅ root-caused, see §10**
 
 **The single most important fact I found:** this build has `DEBUG_LOGGING` compiled out
 entirely. I confirmed this by checking the actual bytes of the shipped `libmain.so` —
@@ -379,3 +388,112 @@ they **differ**, i.e. that scene animates fine. That scene may be an in-engine 3
 sequence rather than an FFmpeg-decoded video, so this does **not** clear §5 — but the
 "video is frozen" symptom should be re-confirmed against a specific, known `.bik`/
 FFmpeg-backed cutscene before time is spent on it, and the two cases distinguished.
+
+---
+
+## 10. ✅ VIDEO ROOT-CAUSED (2026-07-31) — the Android FFmpeg build has no Bink support
+
+**The video half of this report is now solved.** It is a **build-configuration bug, not
+a code bug**, and it is **a completely separate root cause from the music/voice
+silence** — see §10.3, which corrects the framing in §1/§5.
+
+### 10.1 The proof chain
+1. **Every video asset in this game is Bink (`.bik`)** — a proprietary RAD Game Tools
+   format. Verified on the device: `Data/Movies/` contains only `.bik`
+   (`China01_Final_00s.bik`, `CHINA_end.bik`, …), and
+   `Data/english/Movies/` likewise (`EA_LOGO.BIK`, `sizzle_review.bik`, …). A
+   filter for non-`.bik` files in `Data/Movies/` returns **nothing**.
+2. **On Android the real Bink player is stubbed out.**
+   `GeneralsMD/Code/GameEngineDevice/CMakeLists.txt:209` compiles
+   `Source/VideoDevice/BinkVideoPlayerStub.cpp`, and lines 274–276 compile
+   `FFmpegVideoPlayer.cpp` instead. So **FFmpeg is solely responsible for playing
+   `.bik` files** on this platform.
+3. **The Android FFmpeg build contains no Bink demuxer and no Bink decoders.** The
+   literal `configure` command is baked into the shipped `libavcodec.so`:
+   ```
+   --disable-everything
+   --enable-demuxer='wav,mp3,avi,mov'
+   --enable-decoder='pcm_s16le,pcm_s8,pcm_u8,pcm_alaw,pcm_mulaw,
+                     adpcm_ima_wav,adpcm_ms,mp3float,mp3'
+   ```
+   With `--disable-everything`, only that allow-list is built. `bink` appears in
+   neither list.
+4. **Confirmed against the binary, not just the config string.** `llvm-strings` on the
+   shipped `libavformat.so` returns **zero** occurrences of `bink` — the demuxer is
+   definitively absent. (`libavformat.so` is only 398 KB; a full build is ~10 MB.)
+   ⚠️ Note the trap: `libavcodec.so` *does* contain the strings `binkvideo`,
+   `binkaudio_dct`, `binkaudio_rdft`. **Those are false positives** — FFmpeg's
+   `codec_desc` table lists every *known* codec name regardless of what was compiled.
+   Do not treat their presence as evidence the decoder exists. `libavformat` is the
+   reliable place to check for demuxers.
+
+**Consequence:** `FFmpegVideoPlayer` opens a `.bik`, `avformat_open_input()` finds no
+demuxer that can identify the container, `FFmpegFile::open()` returns `false`, and
+playback never starts. This exactly matches the reported symptom (no animation), and
+also explains why any audio embedded in those videos is silent — the file is never
+opened at all.
+
+### 10.2 The fix
+Rebuild the Android FFmpeg with Bink support and re-stage the libraries. Add to the
+existing `configure` line:
+
+```
+--enable-demuxer=bink
+--enable-decoder=binkvideo,binkaudio_dct,binkaudio_rdft
+```
+
+Both audio variants are needed: `.bik` files use either the DCT or the RDFT flavour
+depending on the file's Bink version, and Zero Hour's assets span both. The demuxer
+(`bink`, in `libavformat`) is required in addition to the decoders (in `libavcodec`) —
+enabling only the decoders will not let the container be opened.
+
+Then repackage per the **§8 build guard** — the FFmpeg libraries must be re-staged into
+`jniLibs/arm64-v8a/`, and *all five* must ship. Verify afterwards:
+```bash
+llvm-strings libavformat.so | grep -ci bink     # must be > 0
+```
+
+### 10.3 This CORRECTS the framing in §1 and §5
+§1 argued music, voice, and video share one root cause because they share
+`OpenALAudioStream`. That reasoning was reasonable but is **now shown to be wrong for
+the video case**:
+
+| symptom | root cause | status |
+|---|---|---|
+| Loading/briefing video not animating | **Bink demuxer + decoders absent from the Android FFmpeg build** | ✅ **root-caused (§10)** |
+| Music silent (`.mp3`) | mp3 demuxer *and* `mp3`/`mp3float` decoders **are** present — the file *can* be opened, so this is a different failure | ❌ still open (§3) |
+| Voice/EVA silent (`.wav`, PCM) | wav demuxer *and* `pcm_s16le` decoder **are** present — likewise | ❌ still open (§3) |
+
+So there are **two independent bugs**, both FFmpeg-adjacent but unrelated in cause.
+Fixing the Bink build config will **not** fix music or voice. §3's candidates (the
+streaming buffer-priming race, and the gain/volume path) remain the live leads for the
+audio half, and §9.2's in-use-buffer leak remains worth fixing on its own merits.
+
+### 10.4 A sharper lead for the *audio* half, from the same investigation
+While chasing the above I mapped how each consumer drives `FFmpegFile::decodePacket()`,
+and the split lines up **exactly** with what works:
+
+| path | how it calls `decodePacket()` | status |
+|---|---|---|
+| SFX / UI (`OpenALAudioCache.cpp:62`) | `while (decodePacket()) {}` — drains the entire file in one tight loop at load time | ✅ works |
+| Music / voice (`OpenALAudioManager.cpp:814`) | a **single** call per frame, driven by `m_requireDataCallback` | ❌ broken |
+| Video (`FFmpegVideoPlayer.cpp:335,577`) | a **single** call per frame → `m_good = decodePacket()` | ❌ broken (though §10.1 is sufficient to explain it) |
+
+**The only working consumer is the one that never decodes incrementally.** That makes
+`decodePacket()`'s incremental behaviour the prime suspect for the audio half, which
+sharpens §3a considerably. Two concrete things to examine in
+`Core/GameEngineDevice/Source/VideoDevice/FFmpeg/FFmpegFile.cpp:205`:
+
+- **The `EAGAIN` early-return skips `av_packet_unref()`.** On
+  `avcodec_send_packet(...) == AVERROR(EAGAIN)` the function returns `true`
+  immediately, *before* the `av_packet_unref(m_packet)` on line 236. Every incremental
+  call that hits this path leaks a packet reference. A drain loop that never hits
+  `EAGAIN` would never expose it — consistent with SFX being fine.
+- **`EAGAIN` from `send_packet` means "drain output first, then resend this packet."**
+  The code instead discards the packet and reads a *new* one on the next call, so that
+  input is lost rather than retried. Whether this actually stalls depends on decoder
+  state, and I could not observe it without logging — but it is the kind of defect
+  that only manifests when calls are spread across frames.
+
+Both are worth checking once `RELEASE_DEBUG_LOGGING` (already enabled in the working
+tree, §9.1) produces a real log.
