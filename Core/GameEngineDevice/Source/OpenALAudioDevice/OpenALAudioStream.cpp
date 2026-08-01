@@ -50,6 +50,15 @@ bool OpenALAudioStream::bufferData(uint8_t *data, size_t data_size, ALenum forma
     while (alGetError() != AL_NO_ERROR) {}
     alBufferData(current_buffer, format, data, data_size, samplerate);
     ALenum err = alGetError();
+    // GeneralsX @diagnostic android-port 08/01/2026
+    {
+        static int s_buf = 0;
+        if (s_buf < 20) {
+            fprintf(stderr, "[AUDIO_TRACE]   bufferData#%d src=%u buf=%u size=%zu fmt=0x%x rate=%d err=0x%x\n",
+                s_buf, m_source, current_buffer, data_size, (unsigned)format, samplerate, (unsigned)err);
+            ++s_buf;
+        }
+    }
     if (err != AL_NO_ERROR) {
         DEBUG_LOG(("OpenALAudioStream::bufferData alBufferData failed: err=0x%x format=0x%x size=%zu rate=%d\n",
             (unsigned int)err, (unsigned int)format, data_size, samplerate));
@@ -79,6 +88,21 @@ void OpenALAudioStream::update()
 
     ALint num_queued;
     alGetSourcei(m_source, AL_BUFFERS_QUEUED, &num_queued);
+
+    // GeneralsX @diagnostic android-port 08/01/2026 First N updates per stream: the
+    // state machine that decides whether a stream ever reaches AL_PLAYING.
+    // 0x1011=INITIAL 0x1012=PLAYING 0x1013=PAUSED 0x1014=STOPPED
+    if (m_traceCount < 15) {
+        ALint processed = 0, gain_i = 0;
+        float gain = 0.0f;
+        alGetSourcei(m_source, AL_BUFFERS_PROCESSED, &processed);
+        alGetSourcef(m_source, AL_GAIN, &gain);
+        (void)gain_i;
+        fprintf(stderr, "[AUDIO_TRACE]   update#%d src=%u state=0x%x queued=%d processed=%d gain=%.3f eof=%d\n",
+            m_traceCount, m_source, (unsigned)sourceState, (int)num_queued, (int)processed,
+            gain, (int)m_endOfData);
+        ++m_traceCount;
+    }
 
     // GeneralsX @bugfix 14/06/2026 EOF probe — runs BEFORE the restart-on-stopped guard below.
     // If the source has stopped having fully played everything queued (no unplayed buffers left),

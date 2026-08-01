@@ -33,6 +33,27 @@ endif()
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 
+# GeneralsX @build android-port 08/01/2026 Do NOT enable RELEASE_DEBUG_LOGGING here.
+#
+# It defines DEBUG_LOGGING, which compiles in MiniLog.h's LogClass and, with it,
+# several file-scope global instances (PeerThread.cpp s_pingLog/s_stateChangedLog,
+# WOLLobbyMenu.cpp s_perfLog, W3DModelDraw.cpp BonePosLog, ...). Their constructors
+# run from the dynamic linker's call_constructors() when libmain.so is loaded --
+# i.e. before the engine's memory subsystem exists. Because the engine overrides
+# operator new/delete with its own pool, the std::string work inside LogClass's
+# constructor hits a mismatched allocator and Android's Scudo allocator aborts the
+# process at startup:
+#
+#   Abort message: 'Scudo ERROR: corrupted chunk header at address 0x...'
+#     #06 std::__ndk1::basic_string<...>::append(char const*, unsigned long)
+#     #07 LogClass::LogClass(char const*)
+#     #09 __dl__ZN6soinfo17call_constructorsEv
+#
+# For diagnostics on Android, add targeted fprintf(stderr, ...) calls instead --
+# stderr is already redirected to files/generals-stderr.log by SDL3Main.cpp, and
+# that path does not depend on the engine allocator being up.
+# add_compile_definitions(RELEASE_DEBUG_LOGGING)
+
 # GeneralsX @build BenderAI 10/02/2026
 # Linux port: Make CompatLib headers globally accessible so Core libraries (WWLib, WWMath, etc.)
 # can access platform compatibility types when building for non-Windows platforms

@@ -15,7 +15,7 @@ plugins {
 android {
     namespace 'me.generalsx.zh'
     compileSdk 35
-    ndkVersion "27.1.12297006"
+    ndkVersion "28.2.13676358"
 
     defaultConfig {
         applicationId "me.generalsx.zh"
@@ -52,6 +52,16 @@ android {
                           "-DRTS_BUILD_ZEROHOUR_TOOLS=OFF",
                           "-DRTS_BUILD_ZEROHOUR_EXTRAS=OFF",
                           "-DRTS_BUILD_OPTION_FFMPEG=OFF",
+                          // GeneralsX @bugfix android-port 08/01/2026 Point CMake at the
+                          // hand-built Android FFmpeg. Without this, Core/GameEngineDevice's
+                          // CMakeLists silently takes its "no FFmpeg" branch: it compiles
+                          // FFmpegFileStub.cpp + BinkVideoPlayerStub.cpp and never defines
+                          // RTS_HAS_FFMPEG. The build still succeeds, but the resulting
+                          // libmain.so has NO video and NO audio decoding at all --
+                          // "BinkVideoPlayer::open('Sizzle') - Linux stub" in the log.
+                          // The staged SDK (headers + soname-fixed .so) is produced by
+                          // scripts/build/android/build-ffmpeg-android.sh.
+                          "-DSAGE_ANDROID_FFMPEG_DIR=" + file("${rootDir}/../ffmpeg-android").absolutePath,
                           "-DSAGE_UPDATE_CHECK=OFF",
                           "-DRTS_CRASHDUMP_ENABLE=OFF",
                           "-DRTS_BUILD_OPTION_SAGE_PATCH=OFF"
@@ -117,13 +127,25 @@ android {
             if (sdl3JavaSrc.exists()) {
                 java.srcDirs += sdl3JavaSrc
             } else {
+                // GeneralsX @bugfix android-port 08/01/2026 Add only ONE SDL3 Java root.
+                //
+                // .cxx holds a separate _deps tree per build variant (Debug,
+                // RelWithDebInfo, ...). The previous loop added a srcDir for EVERY
+                // SDLActivity.java it found, so as soon as a second variant had been
+                // configured the Java compile saw two copies of org.libsdl.app.* and
+                // failed with "error: duplicate class: org.libsdl.app.SDLActivity"
+                // (and the same for SDL, SDLMain, HIDDevice*, ...). Take the first
+                // match only; the SDL3 sources are identical across variants.
                 def cxxDir = file(".cxx")
                 if (cxxDir.exists()) {
+                    def sdl3JavaRoot = null
                     cxxDir.eachFileRecurse { f ->
-                        if (f.name == "SDLActivity.java" && f.path.contains("sdl3-src")) {
-                            def javaRoot = f.parentFile.parentFile.parentFile.parentFile
-                            java.srcDirs += javaRoot
+                        if (sdl3JavaRoot == null && f.name == "SDLActivity.java" && f.path.contains("sdl3-src")) {
+                            sdl3JavaRoot = f.parentFile.parentFile.parentFile.parentFile
                         }
+                    }
+                    if (sdl3JavaRoot != null) {
+                        java.srcDirs += sdl3JavaRoot
                     }
                 }
             }

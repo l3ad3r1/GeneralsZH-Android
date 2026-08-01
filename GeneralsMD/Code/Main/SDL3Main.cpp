@@ -71,6 +71,7 @@
 static void gx_force_oboe_audio_backend()
 {
 	setenv("ALSOFT_DRIVERS", "oboe", 1);
+	setenv("ALSOFT_LOGLEVEL", "3", 1);
 }
 #endif
 #include <cctype>
@@ -98,6 +99,8 @@ static void gx_force_oboe_audio_backend()
 static CriticalSection critSec1;
 static CriticalSection critSec2;
 static CriticalSection critSec3;
+
+const char *gAppPrefix = ""; /// So WB can have a different log file name.
 static CriticalSection critSec4;
 static CriticalSection critSec5;
 
@@ -461,9 +464,17 @@ int main(int argc, char* argv[])
 				// see @bugfix note above: SDL owns this pointer, do not free it.
 			}
 			// Capped, filtered stderr file sink (post-mortem evidence after a kill).
+			// GeneralsX @bugfix android-port 08/01/2026 Write the log to EXTERNAL storage
+			// when it is available. Internal storage (/data/data/<pkg>/files) is not
+			// readable over adb for a non-debuggable release build, so the engine's whole
+			// fprintf diagnostic stream was effectively unreachable on a shipping APK --
+			// `adb pull` just returns a stale copy and the real log is invisible. The
+			// external app-specific dir (/sdcard/Android/data/<pkg>/files) is pullable
+			// without root, is still app-private, and is wiped with the app on uninstall.
+			const char *logDir = (extFiles != nullptr) ? extFiles : files;
 			char logPath[1100], prevPath[1100];
-			snprintf(logPath, sizeof(logPath), "%s/generals-stderr.log", files);
-			snprintf(prevPath, sizeof(prevPath), "%s/generals-stderr-prev.log", files);
+			snprintf(logPath, sizeof(logPath), "%s/generals-stderr.log", logDir);
+			snprintf(prevPath, sizeof(prevPath), "%s/generals-stderr-prev.log", logDir);
 			rename(logPath, prevPath);
 			static int s_logFd = open(logPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 			if (s_logFd >= 0) {

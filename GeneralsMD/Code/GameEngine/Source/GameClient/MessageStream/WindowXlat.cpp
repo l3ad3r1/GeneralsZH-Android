@@ -236,6 +236,39 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 			TheMousePos.y = mousePos.y;
 #endif
 
+			// GeneralsX @feature android-port 08/01/2026 Skip a playing movie on click/tap.
+			//
+			// Touch-first devices have no ESC key, so the existing keyboard skip below
+			// is unreachable there. SDL3 synthesises mouse button events from touches
+			// (SDL_HINT_TOUCH_MOUSE_EVENTS, on by default), so handling BUTTON_UP here
+			// covers both a mouse click and a screen tap with one code path.
+			//
+			// This deliberately mirrors the ESC handler's conditions rather than
+			// relaxing them: m_allowExitOutOfMovies is FALSE while the EA logo plays
+			// (it has a legally-required minimum on-screen time set by playLogoMovie),
+			// and only becomes TRUE for the Sizzle intro and in-mission cutscenes.
+			// So a tap skips those but cannot cut the logo short.
+			//
+			// Checked BEFORE winProcessMouseEvent so the tap is consumed as a skip
+			// instead of falling through to whatever shell button sits under the movie.
+			if( msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP
+					&& TheGlobalData->m_allowExitOutOfMovies == TRUE )
+			{
+				const Bool shellMoviePlaying = ( TheDisplay && TheDisplay->isMoviePlaying() );
+				const Bool inGameMoviePlaying = ( TheInGameUI && TheInGameUI->videoBuffer() != nullptr );
+
+				if( shellMoviePlaying || inGameMoviePlaying )
+				{
+					if( shellMoviePlaying )
+						TheDisplay->stopMovie();
+					if( inGameMoviePlaying )
+						TheInGameUI->stopMovie();
+
+					returnCode = WIN_INPUT_USED;
+					break;
+				}
+			}
+
 			// process the mouse event position
 			GameWindowMessage gwm = rawMouseToWindowMessage( msg );
 			if( TheWindowManager )

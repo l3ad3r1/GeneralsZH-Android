@@ -40,6 +40,19 @@
 
 #include "Lib/BaseType.h"
 #include "OpenALAudioDevice/OpenALAudioManager.h"
+
+// GeneralsX @diagnostic android-port 08/01/2026 Route [AUDIO_TRACE] to BOTH stderr and
+// logcat. stderr lands in generals-stderr.log; logcat is readable even if that file
+// path is unavailable, so the trace can never be silently lost.
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define AUDIO_TRACE(...) do { \
+		fprintf(stderr, "[AUDIO_TRACE] " __VA_ARGS__); \
+		__android_log_print(ANDROID_LOG_INFO, "AUDIO_TRACE", __VA_ARGS__); \
+	} while (0)
+#else
+#define AUDIO_TRACE(...) fprintf(stderr, "[AUDIO_TRACE] " __VA_ARGS__)
+#endif
 #include "OpenALAudioDevice/OpenALAudioStream.h"
 #include "OpenALAudioCache.h"
 
@@ -512,6 +525,7 @@ ALenum OpenALAudioManager::getALFormat(uint8_t channels, uint8_t bitsPerSample)
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::init()
 {
+	fprintf(stderr, "DEBUG: REAL OpenALAudioManager::init() ENTERED\n");
 	AudioManager::init();
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("Sound has temporarily been disabled in debug builds only. jkmcd\n"));
@@ -790,27 +804,45 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 			}
 		}
 
+		// GeneralsX @diagnostic android-port 08/01/2026 stream-path tracing (see AUDIO_TRACE)
+		AUDIO_TRACE("playAudioEvent stream: file='%s' type=%s vol=%.2f\n",
+			fileToPlay.str(),
+			(info->m_soundType == AT_Music) ? "AT_Music" : "AT_Streaming",
+			curVolume);
+
 		File* file = TheFileSystem->openFile(fileToPlay.str());
 		if (!file) {
+			AUDIO_TRACE("  FAIL: TheFileSystem->openFile returned NULL for '%s'\n", fileToPlay.str());
 			DEBUG_LOG(("Failed to open file: %s\n", fileToPlay.str()));
 			releasePlayingAudio(audio);
 			return;
 		}
+		AUDIO_TRACE("  openFile OK\n");
 
 		FFmpegFile* ffmpegFile = NEW FFmpegFile();
 		if (!ffmpegFile->open(file))
 		{
+			AUDIO_TRACE("  FAIL: FFmpegFile::open failed for '%s'\n", fileToPlay.str());
 			DEBUG_LOG(("Failed to open FFmpeg file: %s\n", fileToPlay.str()));
 			releasePlayingAudio(audio);
 			return;
 		}
+		AUDIO_TRACE("  FFmpegFile::open OK  channels=%d rate=%d bytesPerSample=%d\n",
+			ffmpegFile->getNumChannels(), ffmpegFile->getSampleRate(), ffmpegFile->getBytesPerSample());
 
 		OpenALAudioStream* stream;
 		if (!handleToKill || foundSoundToReplace) {
 			stream = new OpenALAudioStream;
 			// When we need more data ask FFmpeg for more data.
 			stream->setRequireDataCallback([ffmpegFile, stream]() -> bool {
-				ffmpegFile->decodePacket();
+				// GeneralsX @diagnostic android-port 08/01/2026
+				static int s_decodeCalls = 0;
+				Bool decodeOk = ffmpegFile->decodePacket();
+				if (s_decodeCalls < 20) {
+					AUDIO_TRACE("  decodePacket#%d -> %s  atEof=%d\n",
+						s_decodeCalls, decodeOk ? "true" : "FALSE", (int)ffmpegFile->isAtEof());
+					++s_decodeCalls;
+				}
 				// GeneralsX @bugfix 14/06/2026 Report TRUE end-of-file so a finished one-shot
 				// speech (taunt) stops being restarted and can reach a stable AL_STOPPED. Keys
 				// on real EOF, not a bare decode-error, so long briefings/music and transient
@@ -822,6 +854,16 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 			ffmpegFile->setFrameCallback([stream](AVFrame* frame, int stream_idx, int stream_type, void* user_data) {
 				if (stream_type != AVMEDIA_TYPE_AUDIO) {
 					return;
+				}
+
+				// GeneralsX @diagnostic android-port 08/01/2026
+				static int s_frames = 0;
+				if (s_frames < 20) {
+					AUDIO_TRACE("  frame#%d nb_samples=%d ch=%d rate=%d fmt=%d planar=%d\n",
+						s_frames, frame->nb_samples, frame->ch_layout.nb_channels,
+						frame->sample_rate, frame->format,
+						av_sample_fmt_is_planar(static_cast<AVSampleFormat>(frame->format)));
+					++s_frames;
 				}
 
 				DEBUG_LOG(("Received audio frame\n"));
@@ -2946,6 +2988,15 @@ void OpenALAudioManager::playStream(AudioEventRTS* event, OpenALAudioStream* str
 	}
 
 	stream->play();
+	// GeneralsX @diagnostic android-port 08/01/2026 Note: play() is called here BEFORE any
+	// buffer has been queued (queueing happens later from update()'s data callback).
+	{
+		ALint st = 0, q = 0;
+		alGetSourcei(stream->getSource(), AL_SOURCE_STATE, &st);
+		alGetSourcei(stream->getSource(), AL_BUFFERS_QUEUED, &q);
+		AUDIO_TRACE("  playStream: src=%u post-play state=0x%x queued=%d err=0x%x\n",
+			stream->getSource(), (unsigned)st, (int)q, (unsigned)alGetError());
+	}
 	if (event->getAudioEventInfo()->m_soundType == AT_Music) {
 		// Need to stop/fade out the old music here.
 	}

@@ -3107,32 +3107,53 @@ VideoBuffer*	W3DDisplay::createVideoBuffer()
 void W3DDisplay::drawScaledVideoBuffer( VideoBuffer *buffer, VideoStreamInterface *stream )
 {
 	// TheSuperHackers @bugfix Mauller 20/07/2025 scale videos based on screen size so they are shown in their original aspect
+	// GeneralsX @bugfix android-port 08/01/2026 Use "cover" scaling instead of "fit".
+	//
+	// The previous "fit" behaviour scaled the video to sit entirely inside the screen,
+	// which left uncovered strips along two edges. Nothing paints those strips, so on
+	// Android whatever was rendered beforehand (the animated shell map) showed through
+	// them instead of black -- e.g. an 800x600 movie on a 2200x1440 panel was drawn from
+	// x=140..2060, leaking 140px of shell map down each side.
+	//
+	// "Cover" scales by the LARGER factor so the quad always spans the whole screen and
+	// the overflow is clipped by the viewport. That removes the leak on every device
+	// without any per-video tuning.
+	//
+	// Note this cannot remove letterbox bars that are baked into the source footage:
+	// the ZH intro (sizzle_review.bik) is ~2.05:1 content authored inside a 4:3 frame,
+	// so its bars are pixels in the video itself. Cover scaling crops into them, but the
+	// remainder is content, not a rendering artifact. A fixed crop is NOT safe here --
+	// the mission briefings (e.g. China01_Final_00s.bik) are full-frame 4:3 with no bars,
+	// and cropping those would cut real picture.
 	Real videoAspect = (Real)stream->width() / (Real)stream->height();
 	Real displayAspect = (Real)getWidth() / (Real)getHeight();
-	Bool wideAspect = displayAspect >= videoAspect;
 
 	Int startX = 0;
 	Int endX = 0;
 	Int startY = 0;
 	Int endY = 0;
 
-	if (wideAspect)
+	if (displayAspect >= videoAspect)
 	{
-		// TheSuperHackers @info if we are in a wide aspect, we scale the videos width and fill the height
-		Real heightScale = (Real)getHeight() / (Real)stream->height();
-		startX = (getWidth() / 2.0f) - (stream->width() * heightScale / 2.0f);
-		endX = (getWidth() / 2.0f) + (stream->width() * heightScale / 2.0f);
+		// Screen is wider than the video: match the screen WIDTH and overflow vertically.
+		Real widthScale = (Real)getWidth() / (Real)stream->width();
+		Real scaledHeight = (Real)stream->height() * widthScale;
 
-		endY = getHeight();
+		startX = 0;
+		endX = getWidth();
+		startY = (getHeight() / 2.0f) - (scaledHeight / 2.0f);
+		endY = (getHeight() / 2.0f) + (scaledHeight / 2.0f);
 	}
 	else
 	{
-		// TheSuperHackers @info if we are in a narrow aspect, we scale the videos height and fill the width
-		Real widthScale = (Real)getWidth() / (Real)stream->width();
-		startY = (getHeight() / 2.0f) - (stream->height() * widthScale / 2.0f);
-		endY = (getHeight() / 2.0f) + (stream->height() * widthScale / 2.0f);
+		// Screen is narrower than the video: match the screen HEIGHT and overflow horizontally.
+		Real heightScale = (Real)getHeight() / (Real)stream->height();
+		Real scaledWidth = (Real)stream->width() * heightScale;
 
-		endX = getWidth();
+		startY = 0;
+		endY = getHeight();
+		startX = (getWidth() / 2.0f) - (scaledWidth / 2.0f);
+		endX = (getWidth() / 2.0f) + (scaledWidth / 2.0f);
 	}
 
 	drawVideoBuffer( buffer, startX, startY, endX, endY );
