@@ -308,6 +308,12 @@ public:
 	virtual void setVisibility(Bool visible) { m_visible = visible; } // set visibility for load screens, etc
 	Bool getVisibility() { return m_visible; } // get visibility state
 
+	// GeneralsX @feature android-port 08/01/2026 Is a physical mouse attached?
+	// Touch devices answer honestly (SDL3Mouse overrides this), so edge-of-screen
+	// scrolling can be gated on a real mouse being present. Ported from wingear's
+	// fork -- https://github.com/wingear/GeneralsZH-Android-OpenGL-ES (GPL-3.0).
+	virtual Bool isPhysicalMousePresent() const { return TRUE; }
+
 	void drawTooltip();					///< draw the tooltip text
 	void drawCursorText();			///< draw the mouse cursor text
 	Int getCursorIndex( const AsciiString& name );

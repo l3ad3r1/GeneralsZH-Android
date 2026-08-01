@@ -72,6 +72,23 @@ static void gx_force_oboe_audio_backend()
 {
 	setenv("ALSOFT_DRIVERS", "oboe", 1);
 	setenv("ALSOFT_LOGLEVEL", "3", 1);
+
+	// GeneralsX @tweak android-port 08/01/2026 Deepen the mixer buffer.
+	// Audible clicking is bursts of buffer-queue underruns on peak frames --
+	// visible as a climbing underrun count in `dumpsys media.audio_flinger`,
+	// and far worse once the device is thermally throttled. OpenAL Soft's
+	// default queue is ~35ms (512x3), which peak frames punch straight
+	// through. 1024x4 is ~85ms at 48kHz: inaudible latency for an RTS, and
+	// roughly triple the cushion. These env vars mirror the [general] keys in
+	// alsoft.conf and are backend-agnostic, so they apply to Oboe just as they
+	// do to the OpenSL backend they were originally measured on.
+	//
+	// Ported from wingear's fork (GPL-3.0), commit a2ae64d1 --
+	// https://github.com/wingear/GeneralsZH-Android-OpenGL-ES
+	if (!getenv("ALSOFT_PERIOD_SIZE")) {
+		setenv("ALSOFT_PERIOD_SIZE", "1024", 1);
+		setenv("ALSOFT_PERIODS", "4", 1);
+	}
 }
 #endif
 #include <cctype>

@@ -353,7 +353,13 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				}
 				else
 				{
-					if ( m_currentPos.x < edgeScrollSize || m_currentPos.y < edgeScrollSize || m_currentPos.y >= height-edgeScrollSize || m_currentPos.x >= width-edgeScrollSize )
+					// GeneralsX @tweak android-port 08/01/2026 Edge-scroll only with a
+					// physical mouse. On a touch device the cursor "sticks" wherever the
+					// last tap landed, and a tap near the screen edge left the camera
+					// scrolling forever. Ported from wingear's fork (GPL-3.0) --
+					// https://github.com/wingear/GeneralsZH-Android-OpenGL-ES
+					if ( TheMouse != nullptr && TheMouse->isPhysicalMousePresent() &&
+					     (m_currentPos.x < edgeScrollSize || m_currentPos.y < edgeScrollSize || m_currentPos.y >= height-edgeScrollSize || m_currentPos.x >= width-edgeScrollSize) )
 					{
 						setScrolling(SCROLL_SCREENEDGE);
 					}

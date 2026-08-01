@@ -99,7 +99,24 @@ static const Int DISALLOW_SPEECH_MAX_FRAMES = 30 * 15;
 // Android (vcpkg ffmpeg:arm64-android is broken). Stub the includes so the
 // engine compiles; audio decoding (speech/EVA) is disabled until ffmpeg is
 // hand-built for Android. Visuals + touch work without it.
-#if defined(__ANDROID__)
+//
+// GeneralsX @bugfix android-port 08/01/2026 Take the stub ONLY when there is no
+// real FFmpeg, matching OpenALAudioCache.cpp. Previously this was unconditional
+// on __ANDROID__, so even a build linked against a real hand-built FFmpeg
+// compiled this file against FFmpegAndroidStub.h -- and that stub is not a
+// passive placeholder:
+//
+//   * av_samples_get_buffer_size() returns 0, so the frame callback below
+//     computed frameSize 0 and queued no audio at all; and
+//   * the stub declares its OWN struct AVFrame whose layout does not match
+//     libavutil's, so the real AVFrame* handed over by FFmpegFile.cpp was
+//     read through the wrong offsets (format/nb_samples/ch_layout garbage).
+//
+// The result was engine audio (music, speech, EVA mission commentary) silently
+// producing nothing while video playback -- which decodes inside FFmpegFile.cpp,
+// where the real headers were always used -- worked fine. That split is exactly
+// why the bug survived the fix that wired up SAGE_ANDROID_FFMPEG_DIR.
+#if defined(__ANDROID__) && !defined(RTS_HAS_FFMPEG)
 #include "VideoDevice/FFmpeg/FFmpegAndroidStub.h"
 #else
 extern "C" {

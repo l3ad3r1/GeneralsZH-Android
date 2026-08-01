@@ -60,6 +60,9 @@ public:
 	virtual void setVisibility(Bool visible);
 	virtual void loseFocus();
 	virtual void regainFocus();
+	// GeneralsX @feature android-port 08/01/2026 Honest answer about a physical
+	// mouse; gates edge-scrolling on touch devices.
+	virtual Bool isPhysicalMousePresent() const override { return SDL_HasMouse(); }
 
 	// SDL3-specific methods
 	// Fighter19 pattern: addSDLEvent() accepts raw SDL_Event directly
