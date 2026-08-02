@@ -188,6 +188,9 @@ else()
     # Linux-specific files (SDL3, DXVK)
     list(APPEND GAMEENGINEDEVICE_SRC
         Source/SDL3GameEngine.cpp
+        # GeneralsX @refactor android-port 08/02/2026 Mobile lifecycle + touch
+        # translator, shared by both engines (see SageMobileInput.h).
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Source/SDL3Device/SageMobileInput.cpp
         Include/SDL3GameEngine.h
         Source/SDL3Device/GameClient/SDL3Mouse.cpp
         Include/SDL3Device/GameClient/SDL3Mouse.h
@@ -239,7 +242,9 @@ endif()
 # GeneralsX @refactor fbraz3 31/03/2026 Headers/sources now in Core/GameEngineDevice; include dirs via corei_gameenginedevice_private/public
 if(SAGE_USE_OPENAL)
     include(${CMAKE_SOURCE_DIR}/cmake/openal.cmake)
-    find_package(OpenAL REQUIRED)
+    if(NOT TARGET OpenAL::OpenAL)
+        find_package(OpenAL REQUIRED)
+    endif()
     target_link_libraries(g_gameenginedevice PUBLIC OpenAL::OpenAL)
 endif()
 

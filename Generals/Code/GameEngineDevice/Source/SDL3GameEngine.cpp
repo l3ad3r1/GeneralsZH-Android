@@ -35,6 +35,9 @@
 #endif
 #include "SDL3Device/GameClient/SDL3Mouse.h"
 #include "SDL3Device/GameClient/SDL3Keyboard.h"
+// GeneralsX @feature android-port 08/02/2026 Mobile lifecycle gating and the
+// touch gesture translator, shared with Zero Hour. No-op off mobile.
+#include "SDL3Device/SageMobileInput.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/GameWindow.h"
@@ -187,6 +190,12 @@ void SDL3GameEngine::init(void)
 	m_IsInitialized = true;
 	m_IsActive = true;
 
+#ifdef SAGE_MOBILE
+	// Lifecycle events can fire outside the poll cycle on mobile; catch them
+	// immediately so rendering halts before the process is suspended.
+	SDL_AddEventWatch(SageMobile_LifecycleWatcher, nullptr);
+#endif
+
 	fprintf(stderr, "INFO: SDL3GameEngine using pre-initialized window\n");
 
 	// Call parent init to initialize game subsystems
@@ -213,6 +222,15 @@ void SDL3GameEngine::reset(void)
 void SDL3GameEngine::update(void)
 {
 	pollSDL3Events();
+#ifdef SAGE_MOBILE
+	// Pause sim + render while backgrounded or inactive. Android destroys the
+	// ANativeWindow on background, so presenting there fails hard. Keep polling
+	// so the resume event is still seen; just do not touch the GPU.
+	if (SageMobile_ShouldPauseRendering()) {
+		SDL_Delay(50);
+		return;
+	}
+#endif
 	GameEngine::update();
 }
 
@@ -232,6 +250,15 @@ void SDL3GameEngine::execute(void)
  */
 void SDL3GameEngine::serviceWindowsOS(void)
 {
+#if defined(__ANDROID__) && defined(SAGE_MOBILE)
+	// Debug gesture injector (see SageMobileInput.cpp): started after SDL init,
+	// once per process.
+	static bool s_touchScriptStarted = false;
+	if (!s_touchScriptStarted) {
+		s_touchScriptStarted = true;
+		SDL_DetachThread(SDL_CreateThread(SageMobile_TouchScriptThread, "gx-touch-script", nullptr));
+	}
+#endif
 	pollSDL3Events();
 }
 
@@ -317,6 +344,39 @@ void SDL3GameEngine::pollSDL3Events(void)
 				}
 				break;
 
+#ifdef SAGE_MOBILE
+			// Touch -> mouse. SDL's own synthesis is disabled (SDL3Main.cpp), so the
+			// gesture translator owns every conversion.
+			case SDL_EVENT_FINGER_DOWN:
+			case SDL_EVENT_FINGER_MOTION:
+			case SDL_EVENT_FINGER_UP:
+			case SDL_EVENT_FINGER_CANCELED:
+			{
+				SDL3Mouse *mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
+				if (mouse) {
+					SageMobile_HandleTouchEvent(mouse, m_SDLWindow, event);
+				}
+				break;
+			}
+
+			// App suspension/resume: mirror the desktop focus handling so audio and
+			// mouse state pause cleanly (the render gate lives in update()).
+			case SDL_EVENT_DID_ENTER_BACKGROUND:
+				m_IsActive = false;
+				if (TheMouse) {
+					TheMouse->loseFocus();
+				}
+				break;
+
+			case SDL_EVENT_DID_ENTER_FOREGROUND:
+				m_IsActive = true;
+				if (TheMouse) {
+					TheMouse->regainFocus();
+					TheMouse->refreshCursorCapture();
+				}
+				break;
+#endif
+
 			case SDL_EVENT_WINDOW_RESIZED:
 				handleWindowEvent(event.window);
 				break;
@@ -328,6 +388,16 @@ void SDL3GameEngine::pollSDL3Events(void)
 
 		updateTextInputState();
 	}
+
+#ifdef SAGE_MOBILE
+	// Poll the long-press timer every frame; a stationary finger emits no events.
+	if (TheMouse && m_SDLWindow) {
+		SDL3Mouse* touchMouse = dynamic_cast<SDL3Mouse*>(TheMouse);
+		if (touchMouse) {
+			SageMobile_UpdateTouchLongPress(touchMouse, m_SDLWindow);
+		}
+	}
+#endif
 }
 
 // GeneralsX @bugfix felipebraz 01/04/2026 Enable SDL text input only while an entry gadget owns focus.

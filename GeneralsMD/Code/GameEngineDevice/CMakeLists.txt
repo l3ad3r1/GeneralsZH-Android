@@ -204,6 +204,9 @@ else()
     # Linux-specific files (SDL3, OpenAL+FFmpeg audio, DXVK)
     list(APPEND GAMEENGINEDEVICE_SRC
         Source/SDL3GameEngine.cpp
+        # GeneralsX @refactor android-port 08/02/2026 Mobile lifecycle + touch
+        # translator, shared by both engines (see SageMobileInput.h).
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Source/SDL3Device/SageMobileInput.cpp
         Source/SDL3Device/GameClient/SDL3Mouse.cpp
         Source/SDL3Device/GameClient/SDL3Keyboard.cpp
         Source/VideoDevice/BinkVideoPlayerStub.cpp
