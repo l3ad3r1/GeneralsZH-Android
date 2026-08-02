@@ -56,6 +56,7 @@
 // GeneralsX @feature android-port 08/02/2026 Android startup shared with Zero
 // Hour; see Core/Main/SageAndroidBootstrap.h. No-op off Android.
 #include "SageAndroidBootstrap.h"
+#include "SDL3Device/SageMobileInput.h"
 
 // DXVK WSI
 #define DXVK_WSI_SDL3 1
@@ -347,6 +348,14 @@ int main(int argc, char* argv[])
 			ApplicationHWnd = (HWND)TheSDL3Window;
 			fprintf(stderr, "INFO: SDL3 window created successfully\n");
 		}
+
+#ifdef SAGE_MOBILE
+		// GeneralsX @feature android-port 08/02/2026 Match the engine's internal
+		// resolution to the real screen. Without it the 4:3 default is letterboxed
+		// inside a wide display and window->game coordinates are skewed. Shared
+		// with Zero Hour; see SageMobileInput.h.
+		SageMobile_ApplyNativeResolution(TheSDL3Window, __argc, __argv);
+#endif
 
 		// Call cross-platform game entry point
 		exitcode = GameMain();
