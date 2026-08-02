@@ -199,6 +199,30 @@ public class LauncherActivity extends Activity {
         root.addView(noShellMap);
         root.addView(windowed);
 
+        // ---- extra arguments ----
+        // GeneralsX @feature android-port 08/02/2026 Free-form engine flags. The
+        // engine understands far more than the checkboxes above (-noshroud,
+        // -lowDetail, -xres/-yres, ...), and being able to try one without a
+        // rebuild is the difference between diagnosing a rendering problem in
+        // minutes and in a build cycle.
+        root.addView(sectionLabel("Extra arguments (advanced, optional)"));
+        final android.widget.EditText extraArgs = new android.widget.EditText(this);
+        extraArgs.setHint("e.g. -noshroud -lowDetail");
+        extraArgs.setTextColor(TEXT);
+        extraArgs.setHintTextColor(0xFF6F8098);
+        extraArgs.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        extraArgs.setSingleLine(true);
+        extraArgs.setText(prefs().getString(LauncherConfig.KEY_EXTRA_ARGS, ""));
+        extraArgs.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int d) { }
+            @Override public void onTextChanged(CharSequence c, int a, int b, int d) { }
+            @Override public void afterTextChanged(android.text.Editable e) {
+                prefs().edit().putString(LauncherConfig.KEY_EXTRA_ARGS, e.toString()).apply();
+                updateSummary();
+            }
+        });
+        root.addView(extraArgs, rowParams());
+
         // ---- status ----
         statusText = new TextView(this);
         statusText.setTextColor(MUTED);
