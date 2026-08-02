@@ -56,6 +56,7 @@ public class LauncherActivity extends Activity {
     private static final int TEXT   = 0xFFE6EDF5;
     private static final int MUTED  = 0xFF93A1B2;
 
+    private Spinner engineSpinner;
     private Spinner profileSpinner;
     private Spinner modSpinner;
     private CheckBox skipIntro, noShellMap, windowed;
@@ -114,6 +115,31 @@ public class LauncherActivity extends Activity {
         sub.setPadding(0, dp(2), 0, dp(16));
         root.addView(sub);
 
+        // ---- game (engine) ----
+        root.addView(sectionLabel("Game"));
+        engineSpinner = new Spinner(this);
+        engineSpinner.setBackgroundColor(0xFF1B2230);
+        root.addView(engineSpinner, rowParams());
+        engineSpinner.setAdapter(adapter(java.util.Arrays.asList(
+                "Command & Conquer: Generals — Zero Hour",
+                "Command & Conquer: Generals (original)")));
+        engineSpinner.setSelection(
+                LauncherConfig.ENGINE_GENERALS.equals(
+                        prefs().getString(LauncherConfig.KEY_ENGINE,
+                                          LauncherConfig.ENGINE_ZEROHOUR)) ? 1 : 0);
+        engineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                String want = (pos == 1) ? LauncherConfig.ENGINE_GENERALS
+                                         : LauncherConfig.ENGINE_ZEROHOUR;
+                if (!want.equals(LauncherConfig.engine(LauncherActivity.this))) {
+                    prefs().edit().putString(LauncherConfig.KEY_ENGINE, want).apply();
+                    // Each engine remembers its own data set, so re-read them.
+                    refresh();
+                }
+            }
+            @Override public void onNothingSelected(AdapterView<?> p) { }
+        });
+
         // ---- game / profile ----
         root.addView(sectionLabel("Game data"));
         profileSpinner = new Spinner(this);
@@ -122,7 +148,7 @@ public class LauncherActivity extends Activity {
         profileSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                 if (pos >= 0 && pos < profiles.size()) {
-                    prefs().edit().putString(LauncherConfig.KEY_PROFILE, profiles.get(pos)).apply();
+                    LauncherConfig.setSelectedProfile(LauncherActivity.this, profiles.get(pos));
                     updateSummary();
                 }
             }
@@ -280,8 +306,7 @@ public class LauncherActivity extends Activity {
             profileLabels.add("No game data installed");
         }
         profileSpinner.setAdapter(adapter(profileLabels));
-        String savedProfile = prefs().getString(LauncherConfig.KEY_PROFILE,
-                                                LauncherConfig.STOCK_PROFILE);
+        String savedProfile = LauncherConfig.getSelectedProfile(this);
         int idx = profiles.indexOf(savedProfile);
         if (idx >= 0) profileSpinner.setSelection(idx);
 
@@ -323,8 +348,7 @@ public class LauncherActivity extends Activity {
                 "Tap “Import game files…” and pick the folder holding your .big archives, " +
                 "or push them to:\n" + new File(root, LauncherConfig.STOCK_PROFILE).getAbsolutePath());
         } else {
-            File p = LauncherConfig.profileDir(this,
-                    prefs().getString(LauncherConfig.KEY_PROFILE, LauncherConfig.STOCK_PROFILE));
+            File p = LauncherConfig.profileDir(this, LauncherConfig.getSelectedProfile(this));
             statusText.setText("Ready — " + (p == null ? "?" : p.getAbsolutePath()));
         }
         argsText.setText(LauncherConfig.describeArguments(this));

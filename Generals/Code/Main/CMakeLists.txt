@@ -1,8 +1,21 @@
-add_executable(g_generals WIN32)
+# GeneralsX @feature android-port 08/02/2026
+# Android apps are shared libraries, not executables. Zero Hour already builds
+# this way; Generals now does too, so both engines can ship in one APK and the
+# launcher can choose between them at load time.
+if(ANDROID)
+    add_library(g_generals SHARED)
+else()
+    add_executable(g_generals WIN32)
+endif()
 
 # Use a binary name that doesn't conflict with original game.
 # GeneralsX @build BenderAI 15/02/2026 Linux branding update
-if("${CMAKE_SYSTEM}" MATCHES "Windows")
+if(ANDROID)
+    # Zero Hour owns "libmain.so", because SDL's nativeRunMain defaults to it.
+    # Generals ships alongside as a second engine; GameActivity picks which one
+    # to load via getMainSharedObject().
+    set_target_properties(g_generals PROPERTIES OUTPUT_NAME "main_generals")
+elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     set_target_properties(g_generals PROPERTIES OUTPUT_NAME "generalsv${RTS_BUILD_OUTPUT_SUFFIX}")
 else()
     # GeneralsX @build BenderAI 15/02/2026 Linux branding update
@@ -31,6 +44,36 @@ target_link_libraries(g_generals PRIVATE
     g_gameenginedevice
     gi_always
 )
+
+# GeneralsX @feature android-port 08/02/2026 Android system libraries, matching
+# Zero Hour: liblog for __android_log_print, libandroid for the AAssetManager
+# APIs the shared bootstrap uses to extract fonts out of the APK.
+if(ANDROID)
+    target_link_libraries(g_generals PRIVATE log android)
+endif()
+
+# GeneralsX @bugfix android-port 08/02/2026 Hide the engine's global operator
+# new/delete from other shared libraries, exactly as Zero Hour does. Without
+# this, DXVK allocates through the engine's TheDynamicMemoryAllocator pool,
+# which zeroes every allocation and garbage-fills on free -- that corrupts
+# DXVK's free-lists and crashes in DxvkResourceAllocationPool::alloc().
+if(ANDROID)
+    set(_gx_alloc_map_g "${CMAKE_CURRENT_BINARY_DIR}/gx_hide_alloc_generals.map")
+    file(WRITE "${_gx_alloc_map_g}" [=[
+{
+  global:
+    *;
+  local:
+    _Znw*;
+    _Zna*;
+    _Zdl*;
+    _Zda*;
+};
+]=])
+    target_link_options(g_generals PRIVATE
+        "-Wl,--version-script,${_gx_alloc_map_g}"
+    )
+endif()
 
 # Linux SDL3 windowing/input
 # GeneralsX @build BenderAI 11/02/2026

@@ -53,13 +53,18 @@ public class GameActivity extends SDLActivity {
         // namespace before the engine's dlopen() runs (Android API 24+ namespace
         // isolation requires a lib to be registered via loadLibrary before a
         // bare-name dlopen can find it).
+        // GeneralsX @feature android-port 08/02/2026 The LAST entry selects which
+        // game runs: SDLActivity.getMainSharedObject() turns it into the .so it
+        // dlopens and dlsyms SDL_main from. Both engines ship in the APK --
+        // libmain.so (Zero Hour) and libmain_generals.so (Generals) -- so
+        // switching games is choosing which one goes last here.
         return new String[]{
             "SDL3",
             "SDL3_image",
             "openal",
             "dxvk_d3d9",
             "dxvk_d3d8",
-            "main"
+            LauncherConfig.engine(this)
         };
     }
 

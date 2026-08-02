@@ -47,7 +47,11 @@ android {
                           "-DSAGE_USE_OPENAL=ON",
                           "-DSAGE_USE_GLM=ON",
                           "-DSAGE_DXVK_USE_LOCAL_FORK=ON",
-                          "-DRTS_BUILD_GENERALS=OFF",
+                          // GeneralsX @feature android-port 08/02/2026 Build BOTH engines. Generals
+                          // ships as libmain_generals.so beside Zero Hour's
+                          // libmain.so; GameActivity picks one at load time so
+                          // the launcher can switch between the two games.
+                          "-DRTS_BUILD_GENERALS=ON",
                           "-DRTS_BUILD_CORE_TOOLS=OFF",
                           "-DRTS_BUILD_ZEROHOUR_TOOLS=OFF",
                           "-DRTS_BUILD_ZEROHOUR_EXTRAS=OFF",
@@ -70,7 +74,7 @@ android {
                 // scripts/build/android/README.md) once provided.
                 cFlags "-DANDROID"
                 cppFlags "-DANDROID", "-std=c++20"
-                targets "z_generals"
+                targets "z_generals", "g_generals"
             }
         }
     }

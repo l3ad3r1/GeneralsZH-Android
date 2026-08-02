@@ -37,6 +37,11 @@
 #include <cstdio>
 #include <unistd.h>   // _exit()
 #include <glob.h>     // glob() for Vulkan ICD discovery
+#if defined(__ANDROID__)
+// GeneralsX @feature android-port 08/02/2026 On Android, SDL renames main() to
+// SDL_main and SDLActivity provides the JNI bootstrap that calls it.
+#include <SDL3/SDL_main.h>
+#endif
 
 // USER INCLUDES (match WinMain.cpp pattern)
 #include "Lib/BaseType.h"
@@ -48,6 +53,9 @@
 #include "Common/Debug.h"
 #include "Common/version.h"  // GeneralsX @bugfix BenderAI 14/02/2026 Version class + TheVersion extern
 #include "SDL3GameEngine.h"
+// GeneralsX @feature android-port 08/02/2026 Android startup shared with Zero
+// Hour; see Core/Main/SageAndroidBootstrap.h. No-op off Android.
+#include "SageAndroidBootstrap.h"
 
 // DXVK WSI
 #define DXVK_WSI_SDL3 1
@@ -107,6 +115,13 @@ extern Int GameMain();
  */
 static void FilterSoftwareVulkanICDs()
 {
+#if defined(__ANDROID__)
+	// GeneralsX @feature android-port 08/02/2026 Android has no /usr/share/vulkan
+	// ICD directory and no software Vulkan ICDs to filter; the system driver is
+	// always hardware. Also, bionic's glob() requires API 28+ (we target 24), so
+	// the code below does not even compile there. Matches Zero Hour's guard.
+	return;
+#else
 	if (getenv("VK_DRIVER_FILES") || getenv("VK_ICD_FILENAMES")) {
 		return;
 	}
@@ -158,6 +173,7 @@ static void FilterSoftwareVulkanICDs()
 		fprintf(stderr, "WARNING: Vulkan ICD filter: no hardware ICDs found, LLVMpipe exclusion skipped\n");
 		fprintf(stderr, "WARNING: If startup crashes in libvulkan_lvp.so, set VK_DRIVER_FILES manually\n");
 	}
+#endif // __ANDROID__
 }
 
 /**
@@ -236,10 +252,18 @@ int main(int argc, char* argv[])
 {
 	int exitcode = 1;
 
+	// GeneralsX @feature android-port 08/02/2026 Must be the very first call:
+	// OpenAL reads ALSOFT_DRIVERS when it initialises its backends.
+	SageAndroid_ForceAudioBackend();
+
 	// TheSuperHackers @build felipebraz 13/02/2026
 	// Store command line arguments in globals for CommandLine.cpp parser
 	__argc = argc;
 	__argv = argv;
+
+	// Working directory (honouring the launcher's -datadir), font extraction
+	// from APK assets, and the file log. Shared with Zero Hour.
+	SageAndroid_Bootstrap(argc, argv);
 
 	fprintf(stderr, "=================================================\n");
 	fprintf(stderr, " Command & Conquer Generals (Linux)\n");
@@ -279,6 +303,10 @@ int main(int argc, char* argv[])
 			// This prevents LLVM SIGSEGV crash during Vulkan driver enumeration
 			// Must be done here, not in SDL3GameEngine::init() which is too late
 			fprintf(stderr, "INFO: Initializing SDL3 video subsystem...\n");
+			// GeneralsX @feature android-port 08/02/2026 Android SDL hints (mouse/touch
+			// synthesis off both ways, forced landscape, BACK trapped so right-click
+			// works). Must precede video init. No-op off Android.
+			SageAndroid_SetSdlHints();
 			if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
 				fprintf(stderr, "FATAL: Failed to initialize SDL3: %s\n", SDL_GetError());
 				return 1;

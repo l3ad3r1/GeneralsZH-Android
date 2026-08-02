@@ -35,6 +35,7 @@ public final class LauncherConfig {
 
     public static final String PREFS = "generalsx_launcher";
 
+    public static final String KEY_ENGINE    = "engine";       // ENGINE_* below
     public static final String KEY_PROFILE   = "profile";      // "" = stock GameData
     public static final String KEY_MOD       = "mod";          // "" = none
     public static final String KEY_SKIP_INTRO = "skip_intro";
@@ -46,7 +47,37 @@ public final class LauncherConfig {
     public static final String PROFILES_DIR  = "Profiles";
     public static final String MODS_DIR      = "Mods";
 
+    // Two engines ship in the APK. The value is the native library base name;
+    // SDLActivity derives the .so to run from the last entry of getLibraries(),
+    // so this string is what actually selects which game boots.
+    public static final String ENGINE_ZEROHOUR = "main";
+    public static final String ENGINE_GENERALS = "main_generals";
+
     private LauncherConfig() {}
+
+    public static String engine(Context ctx) {
+        String e = prefs(ctx).getString(KEY_ENGINE, ENGINE_ZEROHOUR);
+        return ENGINE_GENERALS.equals(e) ? ENGINE_GENERALS : ENGINE_ZEROHOUR;
+    }
+
+    public static boolean isGenerals(Context ctx) {
+        return ENGINE_GENERALS.equals(engine(ctx));
+    }
+
+    public static String engineLabel(String engine) {
+        return ENGINE_GENERALS.equals(engine) ? "Generals" : "Zero Hour";
+    }
+
+    /**
+     * Profile choice is stored per engine.
+     *
+     * The two games need different data, so remembering one shared selection
+     * would silently point Generals at Zero Hour's archives (and vice versa)
+     * every time the engine was switched.
+     */
+    private static String profileKeyFor(Context ctx) {
+        return KEY_PROFILE + "_" + engine(ctx);
+    }
 
     public static SharedPreferences prefs(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -176,6 +207,15 @@ public final class LauncherConfig {
         return n;
     }
 
+    /** Currently selected profile for the active engine. */
+    public static String getSelectedProfile(Context ctx) {
+        return prefs(ctx).getString(profileKeyFor(ctx), STOCK_PROFILE);
+    }
+
+    public static void setSelectedProfile(Context ctx, String name) {
+        prefs(ctx).edit().putString(profileKeyFor(ctx), name).apply();
+    }
+
     /**
      * Build the engine's argv from the saved settings.
      *
@@ -188,7 +228,7 @@ public final class LauncherConfig {
         ArrayList<String> args = new ArrayList<>();
         args.add("generalszh");
 
-        File profile = profileDir(ctx, p.getString(KEY_PROFILE, STOCK_PROFILE));
+        File profile = profileDir(ctx, getSelectedProfile(ctx));
         if (profile != null && profile.isDirectory()) {
             args.add("-datadir");
             args.add(profile.getAbsolutePath());
