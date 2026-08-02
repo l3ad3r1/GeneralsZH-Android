@@ -503,8 +503,20 @@ void GameEngine::init()
 		initSubsystem(TheGlobalLanguageData,"TheGlobalLanguageData",MSGNEW("GameEngineSubsystem") GlobalLanguage, nullptr); // must be before the game text
 		TheGlobalLanguageData->parseCustomDefinition();
 		initSubsystem(TheAudio,"TheAudio", createAudioManager(TheGlobalData->m_headless), nullptr);
+#if !defined(__ANDROID__)
+		// GeneralsX @bugfix android-port 08/02/2026 Skip the music presence check
+		// on Android, mirroring the guard Zero Hour has carried since 06/07/2026.
+		//
+		// isMusicAlreadyLoaded() finishes with TheFileSystem->doesFileExist() on a
+		// filename generated from the first music event. That lookup does not
+		// resolve against the .big archive layout used here, so the check returns
+		// FALSE on a perfectly good install and force-quits the engine during
+		// init -- before the first frame. It is why the Generals build booted
+		// completely (every subsystem, MapCache, fonts) and then left the main
+		// loop immediately with exit code 0: m_quitting was already set on entry.
 		if (!TheAudio->isMusicAlreadyLoaded())
 			setQuitting(TRUE);
+#endif
 
 #if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
 		TheNameKeyGenerator->syncNameKeyID();
