@@ -86,7 +86,13 @@ target_sources(g_generals PRIVATE
     $<$<NOT:$<BOOL:${WIN32}>>:SDL3Main.cpp>
     # Linux stubs
     $<$<NOT:$<BOOL:${WIN32}>>:LinuxStubs.cpp>
+    # GeneralsX @refactor android-port 08/02/2026 Shared Android startup, so both
+    # engines get an identical bootstrap instead of two copies that drift apart.
+    $<$<NOT:$<BOOL:${WIN32}>>:${CMAKE_SOURCE_DIR}/Core/Main/SageAndroidBootstrap.cpp>
 )
+
+# The shared Android bootstrap header lives beside its source.
+target_include_directories(g_generals PRIVATE ${CMAKE_SOURCE_DIR}/Core/Main)
 
 # RC files are optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)
