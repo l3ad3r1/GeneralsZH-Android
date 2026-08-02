@@ -1,11 +1,15 @@
-# Command & Conquer: Generals Zero Hour — Android
+# Command & Conquer: Generals + Zero Hour — Android
 
 <img src="assets/android-screenshot.png" alt="Generals Zero Hour main menu running on Android tablet" width="600">
 
-**The full 2003 RTS engine running natively on Android tablets** — not emulation,
-not a compatibility layer. The real C++ engine compiled for arm64, rendering
+**Both 2003 RTS engines running natively on Android tablets** — not emulation,
+not a compatibility layer. The real C++ engines compiled for arm64, rendering
 DirectX 8 → [DXVK](https://github.com/doitsujin/dxvk) → Vulkan on Adreno/Mali GPUs.
 This is the **first-ever DXVK build for Android**.
+
+**Generals and Zero Hour both ship in one APK** and are chosen in the launcher —
+they are two separate engines (`libmain.so` and `libmain_generals.so`), not one
+engine with different data.
 
 > ⚠️ **You must own a legal copy of the game.** No game assets are included or
 > distributed. See [How to Play](#how-to-play) below.
@@ -14,18 +18,25 @@ This is the **first-ever DXVK build for Android**.
 
 ## Status
 
-| Feature | Status |
-|---------|--------|
-| Engine init (all subsystem stores) | ✅ |
-| DXVK D3D8→Vulkan rendering | ✅ |
-| Main menu renders with text | ✅ |
-| Touch input (RTS gesture set) | ✅ |
-| Mouse input (movement, buttons, edge scroll) | ✅ |
-| Audio playback | ✅ music and video audio; see note below |
-| Video playback (Bink intro + cutscenes) | ✅ |
-| Full gameplay session (skirmish) | ✅ |
-| Campaign missions | ✅ |
-| Multiplayer | ❌ untested |
+| Feature | Zero Hour | Generals |
+|---------|:---------:|:--------:|
+| Engine init (all subsystem stores) | ✅ | ✅ |
+| DXVK D3D8→Vulkan rendering | ✅ | ✅ |
+| Main menu renders with text | ✅ | ✅ |
+| Native resolution (no letterboxing) | ✅ | ✅ |
+| Terrain rendering | ✅ | ✅ |
+| Touch input (RTS gesture set) | ✅ | ✅ |
+| Mouse input (movement, buttons, edge scroll) | ✅ | shared code, untested |
+| Audio playback | ✅ music and video audio | shared code, untested |
+| Video playback (Bink intro + cutscenes) | ✅ | shared code, untested |
+| Full gameplay session (skirmish) | ✅ | untested |
+| Campaign missions | ✅ | reaches mission intro |
+| Multiplayer | ❌ untested | ❌ untested |
+
+Generals is newer than Zero Hour here: it boots, renders at native resolution
+with correct terrain, and reaches a campaign mission intro. Everything marked
+"shared code" runs through the same files Zero Hour uses, so it is expected to
+work, but has not been separately confirmed on device.
 
 **Audio note.** Music and video audio are confirmed playing on device. Mission
 speech/EVA commentary goes through the same decoder path, which was fixed in the
@@ -37,7 +48,7 @@ confirmed by ear in a mission.
 | Device | GPU / driver | Renderer | Result |
 |---|---|---|---|
 | OnePlus Pad 2 | Adreno 830, Vulkan 1.3 | Current DXVK lane | Full gameplay verified |
-| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Full mission completed; 30 FPS; video, audio, touch and mouse verified |
+| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Both games. Zero Hour: full mission, 30 FPS, video/audio/touch/mouse verified. Generals: boots to its own menu, native resolution, terrain renders, reaches a mission intro |
 | Galaxy S24 Ultra | Adreno 750, Vulkan 1.3 | Current DXVK lane | Runs; video and audio verified |
 
 The TCL result was measured on physical hardware on 2026-07-30. Text, icons,
@@ -185,10 +196,30 @@ switching between installs possible.
 Starting `GameActivity` directly (an old shortcut, or `adb shell am start`)
 still works and reuses the launcher's saved settings.
 
-> **Base Generals vs Zero Hour:** this build compiles the Zero Hour engine only
-> (`RTS_BUILD_GENERALS=OFF`), so switching *data* — including total conversions —
-> is supported, but running the original Generals campaign is not yet. That needs
-> the second engine target built and selected at load time.
+### Playing the original Generals
+
+Pick **Command & Conquer: Generals (original)** in the launcher's Game dropdown.
+It runs the separate `libmain_generals.so` engine, and remembers its own data
+selection, so switching games does not disturb your Zero Hour setup.
+
+> **Generals needs its own data folder.** A Complete Edition install puts *both*
+> games' archives in one directory (`INI.big` **and** `INIZH.big`, `Audio.big`
+> **and** `AudioZH.big`, …). The engine loads every `.big` in its working
+> directory, so pointing Generals at that folder feeds it Zero Hour's archives
+> and it fails parsing `Multiplayer.ini` — the two games' INI schemas differ.
+>
+> Import your Generals files as their own **profile**, or copy just the 15
+> base-game archives (everything *without* `ZH` in the name):
+>
+> ```
+> Audio.big  AudioEnglish.big  English.big  INI.big  Music.big  Patch.big
+> Speech.big  SpeechEnglish.big  Terrain.big  Textures.big  W3D.big
+> Window.big  gensec.big  maps.big  shaders.big
+> ```
+>
+> If you create the folder with `adb` rather than the launcher, run
+> `chmod -R 777` on it afterwards — files pushed that way are owned by `shell`
+> and the app cannot read them.
 
 ---
 
