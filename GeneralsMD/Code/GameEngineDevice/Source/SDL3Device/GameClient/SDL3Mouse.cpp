@@ -839,6 +839,35 @@ void SDL3Mouse::addSDLEvent(SDL_Event *event)
 		return;  // Not a mouse event, ignore
 	}
 
+	// GeneralsX @bugfix android-port 08/01/2026 Latch that real mouse hardware
+	// exists. SDL_HasMouse() cannot be trusted on Android -- it reports FALSE
+	// with a USB/Bluetooth mouse plugged in -- and edge-of-screen scrolling is
+	// gated on isPhysicalMousePresent(), so relying on it alone silently killed
+	// edge scroll for mouse users.
+	//
+	// The event's device id tells us the truth: a real mouse carries a nonzero
+	// SDL_MouseID, the touch gesture translator's synthetic events leave it 0
+	// (SDL_zero), and touch-synthesised mouse events would carry
+	// SDL_TOUCH_MOUSEID. Once genuine hardware is seen the latch stays set: a
+	// mouse that goes briefly idle must not make the camera stop scrolling.
+	{
+		SDL_MouseID which = 0;
+		switch (event->type) {
+			case SDL_EVENT_MOUSE_MOTION:      which = event->motion.which; break;
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP:   which = event->button.which; break;
+			case SDL_EVENT_MOUSE_WHEEL:       which = event->wheel.which;  break;
+			default: break;
+		}
+		// Anything not tagged SDL_TOUCH_MOUSEID came from real hardware. The id
+		// itself cannot be used as the test: SDL on Android reports which==0 for
+		// a genuine mouse, which is why requiring nonzero left edge-scrolling
+		// dead. The gesture translator tags its own output instead.
+		if (which != SDL_TOUCH_MOUSEID) {
+			m_sawPhysicalMouse = true;
+		}
+	}
+
 	// Check if buffer is full
 	UnsignedInt nextFreeIndex = (m_nextFreeIndex + 1) % MAX_SDL3_MOUSE_EVENTS;
 	if (nextFreeIndex == m_nextGetIndex) {

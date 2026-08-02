@@ -61,8 +61,13 @@ public:
 	virtual void loseFocus();
 	virtual void regainFocus();
 	// GeneralsX @feature android-port 08/01/2026 Honest answer about a physical
-	// mouse; gates edge-scrolling on touch devices.
-	virtual Bool isPhysicalMousePresent() const override { return SDL_HasMouse(); }
+	// mouse; gates edge-scrolling on touch devices. SDL_HasMouse() alone is not
+	// enough -- on Android it reports FALSE even with a mouse attached -- so a
+	// real mouse event seen by addSDLEvent() latches m_sawPhysicalMouse.
+	virtual Bool isPhysicalMousePresent() const override
+	{
+		return (SDL_HasMouse() || m_sawPhysicalMouse) ? TRUE : FALSE;
+	}
 
 	// SDL3-specific methods
 	// Fighter19 pattern: addSDLEvent() accepts raw SDL_Event directly
@@ -105,6 +110,9 @@ private:
 	SDL_Event m_eventBuffer[MAX_SDL3_MOUSE_EVENTS];
 	UnsignedInt m_nextFreeIndex;  // Write position (insert new events here)
 	UnsignedInt m_nextGetIndex;   // Read position (retrieve events from here)
+	// GeneralsX @bugfix android-port 08/01/2026 Set once a mouse event carrying
+	// real hardware's SDL_MouseID arrives; see isPhysicalMousePresent().
+	bool m_sawPhysicalMouse = false;
 
 	SDL_Window* m_Window;
 	Bool m_IsCaptured;

@@ -19,16 +19,26 @@ This is the **first-ever DXVK build for Android**.
 | Engine init (all subsystem stores) | ✅ |
 | DXVK D3D8→Vulkan rendering | ✅ |
 | Main menu renders with text | ✅ |
-| Touch input (tap, drag, pinch) | ✅ |
-| Audio playback | ❌ OpenAL initializes but no sound yet |
+| Touch input (RTS gesture set) | ✅ |
+| Mouse input (movement, buttons, edge scroll) | ✅ |
+| Audio playback | ✅ music and video audio; see note below |
+| Video playback (Bink intro + cutscenes) | ✅ |
 | Full gameplay session (skirmish) | ✅ |
+| Campaign missions | ✅ |
+| Multiplayer | ❌ untested |
+
+**Audio note.** Music and video audio are confirmed playing on device. Mission
+speech/EVA commentary goes through the same decoder path, which was fixed in the
+same change and verified at the object level, but has not been separately
+confirmed by ear in a mission.
 
 ### Verified devices
 
 | Device | GPU / driver | Renderer | Result |
 |---|---|---|---|
 | OnePlus Pad 2 | Adreno 830, Vulkan 1.3 | Current DXVK lane | Full gameplay verified |
-| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Full mission completed successfully; menu at 29–30 FPS |
+| TCL NXTPAPER 9469X | Mali-G57 MC2, Vulkan 1.1.177 | Mali legacy lane | Full mission completed; 30 FPS; video, audio, touch and mouse verified |
+| Galaxy S24 Ultra | Adreno 750, Vulkan 1.3 | Current DXVK lane | Runs; video and audio verified |
 
 The TCL result was measured on physical hardware on 2026-07-30. Text, icons,
 colors, animated menu rendering, touch input, and mission gameplay are correct.
@@ -59,9 +69,22 @@ follow-up coverage.
 
 Grab the latest APK from the [**Releases page**](../../releases):
 
-- Use the normal Android APK for modern Adreno devices with Vulkan 1.3.
-- Use `GeneralsZH-TCL-Mali.apk` for tested Mali-G57-class devices limited to Vulkan
-  1.1 and without BC/DXT texture support.
+Two variants are published, differing **only** in the DXVK layer — the engine
+binary is identical:
+
+| APK | For | DXVK |
+|---|---|---|
+| `GeneralsZH-vX.Y-Vulkan.apk` | Devices with a full **Vulkan 1.3** driver (modern Adreno, e.g. Galaxy S24 Ultra) | 2.6 |
+| `GeneralsZH-vX.Y-TCL-Mali.apk` | **Vulkan 1.1** Mali-G57-class devices without BC/DXT texture support (e.g. TCL NXTPAPER) | Native 1.9.2b + d3d8to9 |
+
+DXVK 2.6 requires desktop-class Vulkan features (`VK_EXT_robustness2`,
+`graphicsPipelineLibrary`, `transformFeedback`) and will not create a device on
+mid-range Mali. If the Vulkan build fails to start, use the Mali one.
+
+> **Do not uninstall to upgrade.** Uninstalling deletes
+> `Android/data/me.generalsx.zh/`, including your copied GameData. Install over
+> the top with `adb install -r`; the releases are signed consistently so this
+> works.
 
 ### Step 2: Install the APK
 
@@ -114,16 +137,43 @@ within a few seconds.
 
 ## Touch Controls
 
-The touch input system maps touchscreen gestures to the RTS mouse semantics the
-2003 engine expects:
+The 2003 engine expects a mouse with two buttons, a wheel, and a cursor that
+exists even when nothing is pressed. Mapping that onto a touchscreen naively
+makes an RTS miserable, so the port uses a gesture scheme built around *"the map
+lives under your finger"*:
 
 | Gesture | Action |
 |---------|--------|
-| **Tap** | Left-click (select unit, click button) |
-| **Tap and hold (600ms)** | Right-click (context menu, deselect) |
-| **Drag** | Left-click drag (selection box) |
-| **Two-finger drag** | Right-click drag (camera pan) |
-| **Two-finger pinch** | Mouse wheel (zoom in/out) |
+| **Tap** | Left-click — order, rally point, button |
+| **Drag one finger** | Pan the camera; the map tracks your finger 1:1 |
+| **Double tap on a unit** | Select every unit of that type on screen |
+| **Double tap on the ground** | Deselect (right-click) |
+| **Double tap, then hold and drag** | Selection box — the first click is swallowed, so you never issue a stray order |
+| **Long press, finger still** | Right-click |
+| **Two-finger drag** | Pan; **pinch** zooms 1:1 through the actual camera height |
+| **Drag over the UI** | Ordinary left-drag, for scrollbars and lists |
+| **While placing a building** | One finger positions it, a second finger rotates it toward that point; lift both to place |
+| **Tap during a movie** | Skip the intro or a cutscene |
+
+Taps fire immediately rather than waiting out the double-tap window, so there is
+no input lag on orders; the double tap is detected on top of the click that has
+already been sent, exactly as on desktop.
+
+> The gesture scheme is ported from
+> [wingear's GLES fork](https://github.com/wingear/GeneralsZH-Android-OpenGL-ES)
+> (GPL-3.0). The design credit is theirs.
+
+## Mouse Support
+
+A USB or Bluetooth mouse works alongside touch — movement, left and right click,
+camera drag, and edge-of-screen scrolling. Edge scrolling activates only when a
+real mouse is present, because a touch cursor stays wherever you last tapped and
+would otherwise pin the camera scrolling at the screen edge.
+
+Android input has several traps here that are not obvious (a mouse also emits
+touch events; `SDL_HasMouse()` reports false with a mouse attached; right-click
+arrives as the BACK button). If you are working on input, read
+[`docs/port/ANDROID_INPUT.md`](docs/port/ANDROID_INPUT.md) first.
 
 ---
 
@@ -209,6 +259,19 @@ Getting a 2003 Windows DirectX 8 game running natively on Android required:
 
 ---
 
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/port/ANDROID_INPUT.md`](docs/port/ANDROID_INPUT.md) | The touch gesture scheme, and the four Android mouse traps that caused regressions (mice emit touch events; `SDL_HasMouse()` lies; a real mouse reports device id `0`; right-click arrives as BACK). **Read before touching input.** |
+| [`docs/port/ANDROID_FFMPEG.md`](docs/port/ANDROID_FFMPEG.md) | The two independent FFmpeg stub layers, why a stubbed build reports SUCCESS with no audio or video, and the one-command check that detects it. Also the Bink `bink` vs `binkvideo` configure trap and the soname fix. |
+| [`docs/port/PORTING_PLAYBOOK.md`](docs/port/PORTING_PLAYBOOK.md) | General porting workflow |
+| [`docs/port/PORTING_PATTERNS.md`](docs/port/PORTING_PATTERNS.md) | Recurring code patterns used across the port |
+| [`docs/port/RELEASE_CHECKLIST.md`](docs/port/RELEASE_CHECKLIST.md) | Steps before cutting a release |
+| [`android.md`](android.md) | Full engineering log of every bug found and fixed |
+
+---
+
 ## Architecture
 
 ```
@@ -223,8 +286,8 @@ Getting a 2003 Windows DirectX 8 game running natively on Android required:
 │  Android Vulkan Driver (Adreno / Mali)        │
 ├──────────────────────────────────────────────┤
 │  Windowing: SDL3 (touch → synthetic mouse)    │
-│  Audio: OpenAL Soft                           │
-│  Video: FFmpeg (stubbed for now)              │
+│  Audio: OpenAL Soft + FFmpeg (Oboe backend)   │
+│  Video: FFmpeg 8.1.1 with Bink decoders       │
 ├──────────────────────────────────────────────┤
 │  Android OS (arm64-v8a, API 24+)              │
 └──────────────────────────────────────────────┘
@@ -246,6 +309,7 @@ This port stands on a chain of community work:
 - **[Fighter19](https://github.com/Fighter19/CnC_Generals_Zero_Hour)** — original Unix/64-bit port: SDL3, DXVK approach, FreeType text rendering
 - **[fbraz3/GeneralsX](https://github.com/fbraz3/GeneralsX)** — macOS/Linux port integrating the above
 - **[ammaarreshi/Generals-Mac-iOS-iPad](https://github.com/ammaarreshi/Generals-Mac-iOS-iPad)** — iOS/iPadOS port (DXVK-on-iOS, touch controls, app lifecycle)
+- **[wingear/GeneralsZH-Android-OpenGL-ES](https://github.com/wingear/GeneralsZH-Android-OpenGL-ES)** — **the RTS touch control scheme used by this port** (instant-tap clicks with double-tap on top, 1:1 map panning, pinch zoom anchored to real camera height, two-finger building placement), plus the OpenAL buffer-depth fix for underrun clicking. Their fork also independently found the FFmpeg stub trap. A hand-written D3D8→OpenGL ES 3.0 backend for devices where DXVK cannot create a device at all — worth reading if your GPU is below the DXVK bar.
 - **This fork** — the Android arm64 port
 - **DXVK, SDL3, OpenAL Soft, Liberation Fonts** — the open-source load-bearing walls
 

@@ -736,6 +736,16 @@ int main(int argc, char* argv[])
 		// SDL3GameEngine.cpp; SDL's automatic touch->mouse synthesis would
 		// double-deliver finger 1 and fight the two-finger pan logic.
 		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+
+		// GeneralsX @bugfix android-port 08/01/2026 ...and the reverse direction
+		// too. SDL_HINT_MOUSE_TOUCH_EVENTS defaults to "1" on mobile, so a real
+		// USB/Bluetooth mouse ALSO emits SDL_EVENT_FINGER_* alongside its normal
+		// mouse events. Those fingers reach the gesture translator, where a drag
+		// is a one-finger map pan -- and a pan deliberately moves the camera
+		// opposite to the finger so the ground stays under it. The result is a
+		// mouse whose movement appears inverted, plus every click delivered
+		// twice. Mice must drive mouse input only.
+		SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
 #endif
 #if defined(__ANDROID__)
 		// GeneralsX @bugfix android-port 07/29/2026 Force landscape at the SDL
@@ -748,6 +758,22 @@ int main(int argc, char* argv[])
 		// second, which lost a free-list race in DxvkResourceAllocationPool
 		// and crashed with SIGSEGV within seconds to a couple of minutes.
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+
+		// GeneralsX @bugfix android-port 08/01/2026 Make the right mouse button
+		// work. On Android a mouse right-click is delivered to the app as the
+		// BACK button, not as SDL_BUTTON_RIGHT, unless BACK is trapped. Without
+		// this the engine never sees a right-click at all: in the default
+		// control scheme that silently kills deselect, and with "Alternate
+		// Mouse Setup" enabled -- where orders live on the right button -- it
+		// removes the ability to give orders entirely.
+		//
+		// SDL documents this hint as exactly the fix ("necessary for the right
+		// mouse button to work on some Android devices ... will also let right
+		// mouse click work on systems where the right mouse button functions as
+		// back"). Trapping also stops the system BACK gesture from backgrounding
+		// the game mid-match; it arrives as SDL_SCANCODE_AC_BACK, which the
+		// engine's keyboard translator does not bind, so it is simply ignored.
+		SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
 		if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
 			fprintf(stderr, "FATAL: Failed to initialize SDL3: %s\n", SDL_GetError());

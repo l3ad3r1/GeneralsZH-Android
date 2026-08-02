@@ -298,15 +298,25 @@ void sendSyntheticMouse(SDL3Mouse *mouse, SDL_Window *window, Uint32 type,
 	SDL_Event ev;
 	SDL_zero(ev);
 	ev.type = type;
+	// GeneralsX @bugfix android-port 08/01/2026 Tag these as touch-derived.
+	// They ARE touch-derived, and saying so lets SDL3Mouse tell a real mouse
+	// apart from this translator's output. Leaving the id at 0 made that
+	// impossible: SDL on Android reports which==0 for the actual mouse too, so
+	// "nonzero means hardware" never fired and edge-scrolling stayed disabled
+	// with a mouse attached. Only the SDL event loop drops SDL_TOUCH_MOUSEID
+	// events, and these are handed straight to addSDLEvent(), so tagging them
+	// cannot cause them to be discarded.
 	switch (type) {
 		case SDL_EVENT_MOUSE_MOTION:
 			ev.motion.windowID = windowID;
+			ev.motion.which = SDL_TOUCH_MOUSEID;
 			ev.motion.x = x;
 			ev.motion.y = y;
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
 			ev.button.windowID = windowID;
+			ev.button.which = SDL_TOUCH_MOUSEID;
 			ev.button.button = button;
 			ev.button.down = (type == SDL_EVENT_MOUSE_BUTTON_DOWN);
 			ev.button.clicks = 1;
@@ -315,6 +325,7 @@ void sendSyntheticMouse(SDL3Mouse *mouse, SDL_Window *window, Uint32 type,
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
 			ev.wheel.windowID = windowID;
+			ev.wheel.which = SDL_TOUCH_MOUSEID;
 			ev.wheel.x = 0.0f;
 			ev.wheel.y = wheelY;
 			ev.wheel.mouse_x = x;
@@ -341,6 +352,19 @@ void beginPan2(int winW, int winH)
 
 void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &event)
 {
+	// GeneralsX @bugfix android-port 08/01/2026 Never let a real mouse drive the
+	// gesture machine. SDL synthesises finger events from mouse input on mobile
+	// (SDL_HINT_MOUSE_TOUCH_EVENTS defaults to "1" there); those arrive tagged
+	// with SDL_MOUSE_TOUCHID. Left unfiltered, a mouse drag becomes a one-finger
+	// map pan -- which moves the camera opposite to the drag on purpose -- so the
+	// mouse reads as inverted, and each click is also delivered twice. The hint
+	// is turned off in SDL3Main.cpp; this is the belt-and-braces guard, because
+	// the hint is documented as settable at any time and a synthesised finger is
+	// never something this translator should act on.
+	if (event.tfinger.touchID == SDL_MOUSE_TOUCHID) {
+		return;
+	}
+
 	int winW = 0, winH = 0;
 	SDL_GetWindowSize(window, &winW, &winH);
 	const float px = event.tfinger.x * (float)winW;
