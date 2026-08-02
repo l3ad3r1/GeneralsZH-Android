@@ -3597,8 +3597,20 @@ Int FlatTerrainShaderPixelShader::init()
 	return false;
 #endif
 
+	// GeneralsX @bugfix android-port 08/02/2026 Actually initialise the 2-stage
+	// shader, as the comment below has always claimed. It was never called, so
+	// when a pixel shader failed to load the "return FALSE" paths beneath left
+	// every ST_FLAT_TERRAIN_* slot empty and the ground rendered black.
+	//
+	// The sibling TerrainShaderPixelShader::init() gets this right --
+	// "if (terrainShader2Stage.init() && ...)" -- which is why the regular
+	// terrain path degrades cleanly and this one did not. Only Generals hit it:
+	// the shipped shaders.big / ShadersZH.big here are ~1KB stubs, so the pixel
+	// shader path always fails and the fallback is what actually draws.
+	//
 	//this shader will also use the 2Stage shader for some of the passes so initialize it too.
-	if ((res=W3DShaderManager::getChipset()) >= DC_GENERIC_PIXEL_SHADER_1_1)
+	if (flatTerrainShader2Stage.init() &&
+	    (res=W3DShaderManager::getChipset()) >= DC_GENERIC_PIXEL_SHADER_1_1)
 	{
 		if (res >= DC_GENERIC_PIXEL_SHADER_1_1)
 		{
