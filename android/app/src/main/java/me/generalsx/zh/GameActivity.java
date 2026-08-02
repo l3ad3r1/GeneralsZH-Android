@@ -18,7 +18,33 @@ package me.generalsx.zh;
 
 import org.libsdl.app.SDLActivity;
 
+import java.util.ArrayList;
+
 public class GameActivity extends SDLActivity {
+
+    /** Intent extra: the argv LauncherActivity built, minus argv[0]'s meaning. */
+    public static final String EXTRA_ARGS = "me.generalsx.zh.ARGS";
+
+    // GeneralsX @feature android-port 08/02/2026 Hand the launcher's flags to the
+    // engine. SDLActivity passes whatever this returns to nativeRunMain as argv,
+    // which reaches main() in SDL3Main.cpp and, through __argv, CommandLine.cpp.
+    //
+    // Launching the Activity directly (adb am start, or a home-screen shortcut to
+    // the old entry point) simply yields no extra, and the engine falls back to
+    // its default data directory — so the game still starts without the launcher.
+    @Override
+    protected String[] getArguments() {
+        ArrayList<String> args = null;
+        if (getIntent() != null) {
+            args = getIntent().getStringArrayListExtra(EXTRA_ARGS);
+        }
+        if (args == null || args.isEmpty()) {
+            // Not launched from the launcher: use the saved settings anyway, so
+            // behaviour stays consistent however the game was started.
+            args = LauncherConfig.buildArguments(this);
+        }
+        return args.toArray(new String[0]);
+    }
     @Override
     protected String[] getLibraries() {
         // Order matters: the engine (libmain.so) dlopens libdxvk_d3d8.so, which

@@ -351,7 +351,31 @@ int main(int argc, char* argv[])
 			extFiles ? extFiles : "(null)", files ? files : "(null)");
 
 		bool chdirOk = false;
-		if (extFiles != nullptr) {
+
+		// GeneralsX @feature android-port 08/02/2026 Honour "-datadir <path>",
+		// which the launcher passes to select a data profile (base game, or a
+		// mod install such as ShockWave / Rise of the Reds). Scanned here rather
+		// than in CommandLine.cpp because the working directory has to be set
+		// before the engine's file systems come up, long before parseCommandLine
+		// runs. Unknown flags are skipped by that parser (`if (!found) arg++`),
+		// so it passes through harmlessly there.
+		for (int i = 1; i + 1 < argc; ++i) {
+			if (argv[i] != nullptr && strcmp(argv[i], "-datadir") == 0 && argv[i + 1] != nullptr) {
+				if (access(argv[i + 1], R_OK) == 0 && chdir(argv[i + 1]) == 0) {
+					__android_log_print(ANDROID_LOG_INFO, "GeneralsX",
+						"CWD -> %s (-datadir)", argv[i + 1]);
+					chdirOk = true;
+				} else {
+					// Fall through to the default search rather than failing: a
+					// stale profile path must not make the game unlaunchable.
+					__android_log_print(ANDROID_LOG_WARN, "GeneralsX",
+						"-datadir '%s' unusable, falling back", argv[i + 1]);
+				}
+				break;
+			}
+		}
+
+		if (!chdirOk && extFiles != nullptr) {
 			char gameData[1024];
 			snprintf(gameData, sizeof(gameData), "%s/GameData", extFiles);
 			if (access(gameData, R_OK) == 0 && chdir(gameData) == 0) {
@@ -390,8 +414,21 @@ int main(int argc, char* argv[])
 		{
 			char fontsDir[1024];
 			const char *extractBase = nullptr;
+
+			// GeneralsX @bugfix android-port 08/02/2026 Extract into <CWD>/fonts,
+			// which is what the font locator actually probes. This used to be
+			// hardcoded to "<external>/GameData/fonts"; that happens to be the
+			// CWD in the default layout, but with the launcher's "-datadir" a
+			// profile can live anywhere (a mod install, internal storage), and
+			// the fonts would then be written somewhere the engine never looks.
+			char cwdBuf[1024];
+			if (chdirOk && getcwd(cwdBuf, sizeof(cwdBuf)) != nullptr) {
+				snprintf(fontsDir, sizeof(fontsDir), "%s/fonts", cwdBuf);
+				extractBase = fontsDir;
+			}
+
 			const char *extFiles2 = SDL_GetAndroidExternalStoragePath();
-			if (extFiles2 != nullptr) {
+			if (extractBase == nullptr && extFiles2 != nullptr) {
 				snprintf(fontsDir, sizeof(fontsDir), "%s/GameData/fonts", extFiles2);
 				extractBase = fontsDir;
 				// see @bugfix note above: SDL owns this pointer, do not free it.

@@ -49,6 +49,15 @@ def parse_args():
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--strip", type=Path,
                    help="llvm-strip binary; if given, libmain.so is stripped first")
+    p.add_argument("--dxvk-from", type=Path,
+                   help="APK to take the Mali DXVK libraries from. Use this when "
+                        "--base is a FRESH Gradle APK (so its classes.dex and "
+                        "manifest are current) and only the graphics runtime needs "
+                        "swapping back to DXVK Native 1.9.2b.")
+    p.add_argument("--require-dex-string", action="append", default=[], metavar="TEXT",
+                   help="fail unless TEXT appears in the APK's classes.dex. Guards "
+                        "against grafting onto a stale base whose Java code predates "
+                        "the change being shipped (see the dex note below).")
     return p.parse_args()
 
 
@@ -79,6 +88,26 @@ def main():
             if not p.is_file():
                 sys.exit(f"missing FFmpeg library: {p}")
             replacements[LIB + name] = p
+
+    # Pull the Mali graphics runtime out of a donor APK. This is what lets --base
+    # be the current Gradle output instead of an old known-good APK: grafting onto
+    # an old base also inherits its classes.dex and AndroidManifest, so any Java
+    # change (a new Activity, a manifest entry) is silently dropped while every
+    # native check still passes. That happened once with the launcher.
+    if a.dxvk_from:
+        if not a.dxvk_from.is_file():
+            sys.exit(f"--dxvk-from APK not found: {a.dxvk_from}")
+        if not tmpdir:
+            tmpdir = tempfile.mkdtemp()
+        with zipfile.ZipFile(a.dxvk_from) as donor:
+            for name in ("libdxvk_d3d8.so", "libdxvk_d3d9.so"):
+                entry = LIB + name
+                if entry not in donor.namelist():
+                    sys.exit(f"--dxvk-from APK has no {entry}")
+                out = Path(tmpdir) / name
+                out.write_bytes(donor.read(entry))
+                replacements[entry] = out
+                print(f"dxvk from donor: {name} = {out.stat().st_size} bytes")
 
     if not replacements:
         sys.exit("nothing to do: pass --libmain and/or --ffmpeg-dir")
@@ -134,6 +163,17 @@ def main():
             problems.append(
                 "libmain.so contains BinkVideoPlayerStub -- built WITHOUT FFmpeg; "
                 "videos and audio will silently not play")
+
+        # Stale-dex guard. Every other check here inspects native code, so an APK
+        # grafted onto an old base passes them all while shipping outdated Java.
+        if a.require_dex_string:
+            dex = b"".join(z.read(n) for n in z.namelist() if n.endswith(".dex"))
+            for needed in a.require_dex_string:
+                if needed.encode() not in dex:
+                    problems.append(
+                        f"classes.dex does not contain {needed!r} -- the base APK's "
+                        f"Java code is stale. Rebuild, or use --base <fresh APK> "
+                        f"with --dxvk-from <old Mali APK>.")
 
         print(f"verify: libmain.so={main_sz}  libdxvk_d3d9.so={d9}  "
               f"ffmpeg={'all present' if not problems else 'PROBLEM'}")

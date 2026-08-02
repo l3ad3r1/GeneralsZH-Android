@@ -130,8 +130,65 @@ adb push "*.big" /sdcard/Android/data/me.generalsx.zh/files/GameData/Data/
 
 ### Step 4: Play
 
-Launch **"Generals ZH"** from your app drawer. The main menu should appear
-within a few seconds.
+Launch **"Generals ZH"** from your app drawer. The launcher opens first.
+
+---
+
+## The Launcher
+
+Opening the app shows a launcher rather than starting the game directly. It
+handles the things that previously needed a PC and `adb`:
+
+| | |
+|---|---|
+| **Game data** | Pick which installed data set to run. Your existing `GameData` folder is detected automatically — nothing to migrate. |
+| **Import game files…** | Copy a game install straight from the tablet's storage (or an SD card / USB drive) with a folder picker and a progress bar. No PC needed. |
+| **Mod** | Select an installed mod, applied over the chosen game data. |
+| **Install mod…** | Import a mod folder the same way, naming it as you go. |
+| **Skip intro videos** | Straight to the menu — **5 seconds instead of 80** on a TCL NXTPAPER. |
+| **Disable animated menu background** | Drops the 3D shell map, the biggest menu cost on weak GPUs. |
+| **Windowed** | Run windowed rather than fullscreen. |
+| **Storage info** | Where data lives, free space, what's installed, and the `adb push` command if you prefer the PC route. |
+
+The launcher shows the exact engine flags it will pass, so what it does is never
+a mystery.
+
+### Multiple installs and mods
+
+Data sets live side by side, so a mod never overwrites your base game:
+
+```
+Android/data/me.generalsx.zh/files/
+  GameData/                  <- your main install (unchanged)
+  Profiles/ShockWave/        <- additional full data sets
+  Profiles/RiseOfTheReds/
+  Mods/<name>/               <- partial mods, layered with -mod
+```
+
+Importing when data already exists asks whether to add it as a new profile or
+replace the existing one.
+
+Total conversions such as [ShockWave and Rise of the
+Reds](https://www.moddb.com/games/cc-generals-zero-hour) ship as a full data set
+(import as a **profile**) or as files layered over Zero Hour (import as a
+**mod**). Both routes are supported. The mod plumbing uses the engine's own
+`-mod` flag; specific mods have not been individually tested.
+
+### Under the hood
+
+The launcher passes ordinary engine command-line flags — `-nologo`,
+`-noshellmap`, `-win`, `-mod <path>` — all of which the 2003 engine already
+understood. Only one addition was needed: **`-datadir <path>`**, handled in
+`SDL3Main.cpp` before the working directory is set, which is what makes
+switching between installs possible.
+
+Starting `GameActivity` directly (an old shortcut, or `adb shell am start`)
+still works and reuses the launcher's saved settings.
+
+> **Base Generals vs Zero Hour:** this build compiles the Zero Hour engine only
+> (`RTS_BUILD_GENERALS=OFF`), so switching *data* — including total conversions —
+> is supported, but running the original Generals campaign is not yet. That needs
+> the second engine target built and selected at load time.
 
 ---
 

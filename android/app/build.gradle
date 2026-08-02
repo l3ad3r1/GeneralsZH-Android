@@ -174,4 +174,9 @@ configurations.configureEach {
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
+    // GeneralsX @feature android-port 08/02/2026 DocumentFile lets the launcher
+    // walk a folder the user picked with ACTION_OPEN_DOCUMENT_TREE. That is the
+    // only way to read a game install from shared storage on Android 11+ without
+    // MANAGE_EXTERNAL_STORAGE, which is a Play-restricted permission.
+    implementation 'androidx.documentfile:documentfile:1.0.1'
 }
