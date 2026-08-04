@@ -29,7 +29,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Generals Zero Hour"
+        android:label="Generals + Zero Hour"
         android:hasCode="true"
         android:largeHeap="true"
         android:supportsRtl="false"
@@ -50,7 +50,7 @@
         <activity
             android:name=".LauncherActivity"
             android:exported="true"
-            android:label="Generals Zero Hour"
+            android:label="Generals + Zero Hour"
             android:screenOrientation="landscape"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 

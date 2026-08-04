@@ -75,9 +75,11 @@ public final class GameDataImporter {
                     if (files.isEmpty()) {
                         finish(listener, false,
                             "No game files found there.\n\n" +
-                            "Pick the folder that contains the .big archives — for a Steam " +
-                            "install that is:\n" +
-                            "steamapps/common/Command and Conquer Generals Zero Hour");
+                            "Pick the folder holding the game archives:\n\n" +
+                            "A game install has .big files - for Steam that is\n" +
+                            "  steamapps/common/Command and Conquer Generals Zero Hour\n\n" +
+                            "A mod has .gib files - for GenLauncher that is\n" +
+                            "  <game>/Data/GLM/<mod name>/<version>");
                         return;
                     }
 

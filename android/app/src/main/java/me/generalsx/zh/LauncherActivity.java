@@ -60,7 +60,7 @@ public class LauncherActivity extends Activity {
     private Spinner profileSpinner;
     private Spinner modSpinner;
     private CheckBox skipIntro, noShellMap, windowed, noShadowVolumes;
-    private TextView statusText, argsText;
+    private TextView statusText, argsText, titleText;
     private ProgressBar progress;
     private Button playButton;
 
@@ -101,12 +101,16 @@ public class LauncherActivity extends Activity {
         title.setLetterSpacing(0.25f);
         root.addView(title);
 
-        TextView title2 = new TextView(this);
-        title2.setText("GENERALS  ZERO:HOUR");
-        title2.setTextColor(TEXT);
-        title2.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
-        title2.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(title2);
+        // GeneralsX @bugfix android-port 08/04/2026 The heading was a hardcoded
+        // "GENERALS ZERO:HOUR" -- wrong on two counts: the game is "Zero Hour",
+        // and the heading became inaccurate once the APK shipped
+        // both engines: selecting Generals still showed the Zero Hour title.
+        // It now follows the selected game.
+        titleText = new TextView(this);
+        titleText.setTextColor(TEXT);
+        titleText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
+        titleText.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(titleText);
 
         TextView sub = new TextView(this);
         sub.setText("Android launcher");
@@ -372,11 +376,16 @@ public class LauncherActivity extends Activity {
         } else if (!ready) {
             statusText.setText(
                 "No game data found.\n\n" +
-                "Tap “Import game files…” and pick the folder holding your .big archives, " +
-                "or push them to:\n" + new File(root, LauncherConfig.STOCK_PROFILE).getAbsolutePath());
+                "Tap the Import game files button and pick the folder holding your game "
+                + "archives (.big for a game install, .gib for a mod), or push them to:\n"
+                + new File(root, LauncherConfig.STOCK_PROFILE).getAbsolutePath());
         } else {
             File p = LauncherConfig.profileDir(this, LauncherConfig.getSelectedProfile(this));
             statusText.setText("Ready — " + (p == null ? "?" : p.getAbsolutePath()));
+        }
+        if (titleText != null) {
+            titleText.setText(LauncherConfig.isGenerals(this)
+                    ? "GENERALS" : "GENERALS ZERO HOUR");
         }
         argsText.setText(LauncherConfig.describeArguments(this));
     }
@@ -566,7 +575,7 @@ public class LauncherActivity extends Activity {
             else for (String m : ms) sb.append("  • ").append(m).append('\n');
 
             sb.append("\nTo copy files with adb instead:\n")
-              .append("adb push *.big \"")
+              .append("adb push *.big *.gib \"")
               .append(new File(root, LauncherConfig.STOCK_PROFILE).getAbsolutePath())
               .append("/\"");
         }
