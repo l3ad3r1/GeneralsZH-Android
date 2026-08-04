@@ -247,6 +247,23 @@ void ArchiveFileSystem::loadMods()
 		MAYBE_UNUSED Bool ret = loadBigFilesFromDirectory(TheGlobalData->m_modDir, "*.big", TRUE);
 		(void)ret;
 		DEBUG_ASSERTLOG(ret, ("loadBigFilesFromDirectory(%s) returned FALSE!", TheGlobalData->m_modDir.str()));
+
+		// GeneralsX @feature 08/02/2026 Also load "*.gib" from a mod directory.
+		//
+		// Community mods do not ship .big files. Rise of the Reds, and every other
+		// mod distributed through GenLauncher, ships .gib -- the identical BIG
+		// container under a different extension, chosen precisely so the retail
+		// game does NOT auto-load it (which is why GenLauncher needs a modded exe).
+		// A mod folder therefore contains nothing this loader could see, and -mod
+		// silently did nothing.
+		//
+		// The archive parser only cares about the container format, not the
+		// filename, so the same call handles them. Loading .gib second is
+		// deliberate: within a mod, precedence is expressed through the '!' and
+		// '!!!' filename prefixes that sort ahead of ordinary names, and later
+		// loads win with overwrite=TRUE.
+		ret = loadBigFilesFromDirectory(TheGlobalData->m_modDir, "*.gib", TRUE);
+		(void)ret;
 	}
 }
 

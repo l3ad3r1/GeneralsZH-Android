@@ -173,6 +173,14 @@ public final class GameDataImporter {
     private static boolean isWanted(String name) {
         String n = name.toLowerCase(Locale.US);
         return n.endsWith(".big")     // archives: the bulk of the game
+            // GeneralsX @bugfix android-port 08/02/2026 .gib is the same BIGF
+            // container under a different extension. Community mods ship it
+            // exclusively -- Rise of the Reds is 17 .gib files and not one .big --
+            // the extension chosen so the retail game does NOT auto-load them.
+            // Without this, importing a mod folder copied zero files and then
+            // reported "No game files found there", which looks like a broken
+            // import rather than an unsupported format.
+            || n.endsWith(".gib")
             || n.endsWith(".ini")     // loose config (mods ship these unpacked)
             || n.endsWith(".bik")     // videos
             || n.endsWith(".wav") || n.endsWith(".mp3")

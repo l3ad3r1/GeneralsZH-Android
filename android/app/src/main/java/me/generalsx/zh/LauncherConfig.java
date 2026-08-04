@@ -167,27 +167,38 @@ public final class LauncherConfig {
     }
 
     /**
-     * True if the directory looks like game data: at least one .big, either
+     * True if the directory looks like game data: at least one archive, either
      * directly inside or one level down (retail installs keep them beside the
      * executable; some copies nest them in Data/).
+     *
+     * GeneralsX @bugfix android-port 08/02/2026 Accept .gib as well as .big.
+     * Community mods ship .gib exclusively -- the same BIGF container under a
+     * different extension -- so a perfectly good Rise of the Reds folder was
+     * being rejected as "empty" and never offered in the launcher.
      */
     public static boolean hasGameData(File dir) {
         if (dir == null || !dir.isDirectory()) return false;
         File[] kids = dir.listFiles();
         if (kids == null) return false;
         for (File k : kids) {
-            if (k.isFile() && k.getName().toLowerCase().endsWith(".big")) return true;
+            if (k.isFile() && isArchive(k.getName())) return true;
         }
         for (File k : kids) {
             if (k.isDirectory()) {
                 File[] sub = k.listFiles();
                 if (sub == null) continue;
                 for (File s : sub) {
-                    if (s.isFile() && s.getName().toLowerCase().endsWith(".big")) return true;
+                    if (s.isFile() && isArchive(s.getName())) return true;
                 }
             }
         }
         return false;
+    }
+
+    /** A BIGF archive: .big (base game) or .gib (mods). */
+    public static boolean isArchive(String name) {
+        String n = name.toLowerCase();
+        return n.endsWith(".big") || n.endsWith(".gib");
     }
 
     private static boolean isEmptyDir(File dir) {
@@ -195,14 +206,17 @@ public final class LauncherConfig {
         return kids == null || kids.length == 0;
     }
 
-    /** Count of .big archives directly in a profile, for the UI summary. */
+    /**
+     * Count of archives directly in a profile, for the UI summary. Counts .gib
+     * too, so a mod folder does not display as "0 archives" while being usable.
+     */
     public static int countBigFiles(File dir) {
         if (dir == null || !dir.isDirectory()) return 0;
         File[] kids = dir.listFiles();
         if (kids == null) return 0;
         int n = 0;
         for (File k : kids) {
-            if (k.isFile() && k.getName().toLowerCase().endsWith(".big")) n++;
+            if (k.isFile() && isArchive(k.getName())) n++;
         }
         return n;
     }
