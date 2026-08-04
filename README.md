@@ -34,7 +34,17 @@ engine with different data.
 | Multiplayer | ❌ untested | ❌ untested |
 
 **Mods** load from `.gib` archives, so GenLauncher-format mods work. Rise of the
-Reds is verified playable: its own menus, factions, units and skirmish.
+Reds is verified playable: its own menus, factions, units and skirmish. ShockWave,
+Project Raptor, Generals Continue and Shockwave Chaos ship the same way and should
+import, but have not been run.
+
+> **Limitation:** the engine reads only **archives and videos** from a mod
+> directory (`-mod`). Loose files a mod ships outside an archive are copied by the
+> importer but are not on the engine's search path — most notably
+> `Data/Scripts/SkirmishScripts.scb`, the compiled skirmish AI. Mods that ship it
+> loose (Generals Continue, Project Raptor) will install and run, but their AI
+> opponents may not behave correctly. Mods that pack everything into `.gib`
+> (Rise of the Reds, ShockWave) are unaffected.
 
 **Shadow volumes are disabled by default** (a launcher toggle). They draw as
 opaque black geometry through DXVK on Mali, which is what most "black terrain"

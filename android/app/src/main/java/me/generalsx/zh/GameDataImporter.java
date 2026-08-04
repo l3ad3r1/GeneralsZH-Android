@@ -187,6 +187,12 @@ public final class GameDataImporter {
             || n.endsWith(".tga") || n.endsWith(".dds")
             || n.endsWith(".w3d")     // models
             || n.endsWith(".map")
+            // GeneralsX @bugfix android-port 08/04/2026 Compiled script bundles.
+            // Data/Scripts/SkirmishScripts.scb is the skirmish AI -- 3.3MB in
+            // C&C Generals Continue. Dropping it silently would leave those mods
+            // installed but with no working AI opponents, which reads as a game
+            // bug rather than a missing file.
+            || n.endsWith(".scb")
             || n.endsWith(".str")     // localised text
             || n.endsWith(".csf")
             || n.endsWith(".ttf");
