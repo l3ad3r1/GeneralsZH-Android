@@ -59,7 +59,7 @@ public class LauncherActivity extends Activity {
     private Spinner engineSpinner;
     private Spinner profileSpinner;
     private Spinner modSpinner;
-    private CheckBox skipIntro, noShellMap, windowed;
+    private CheckBox skipIntro, noShellMap, windowed, noShadowVolumes;
     private TextView statusText, argsText;
     private ProgressBar progress;
     private Button playButton;
@@ -195,9 +195,12 @@ public class LauncherActivity extends Activity {
         noShellMap = check("Disable animated menu background (faster on weak GPUs)",
                            LauncherConfig.KEY_NO_SHELLMAP, false);
         windowed   = check("Windowed", LauncherConfig.KEY_WINDOWED, false);
+        noShadowVolumes = check("Disable shadow volumes (fixes black buildings/shadows)",
+                                LauncherConfig.KEY_NO_SHADOW_VOLUMES, true);
         root.addView(skipIntro);
         root.addView(noShellMap);
         root.addView(windowed);
+        root.addView(noShadowVolumes);
 
         // ---- extra arguments ----
         // GeneralsX @feature android-port 08/02/2026 Free-form engine flags. The

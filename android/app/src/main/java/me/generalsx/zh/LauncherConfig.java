@@ -41,6 +41,7 @@ public final class LauncherConfig {
     public static final String KEY_SKIP_INTRO = "skip_intro";
     public static final String KEY_NO_SHELLMAP = "no_shellmap";
     public static final String KEY_WINDOWED  = "windowed";
+    public static final String KEY_NO_SHADOW_VOLUMES = "no_shadow_volumes";
     public static final String KEY_EXTRA_ARGS = "extra_args";
 
     public static final String STOCK_PROFILE = "GameData";
@@ -271,6 +272,15 @@ public final class LauncherConfig {
         }
         if (p.getBoolean(KEY_WINDOWED, false)) {
             args.add("-win");
+        }
+        // Default ON. Stencil shadow volumes draw as solid black geometry through
+        // DXVK on Mali here -- buildings and their shadows become opaque blobs
+        // that look like missing textures. Turning them off falls back to shadow
+        // decals, which render correctly. Observed on a TCL NXTPAPER (Mali-G57);
+        // left as a toggle because a GPU that handles volumes properly should be
+        // able to have them.
+        if (p.getBoolean(KEY_NO_SHADOW_VOLUMES, true)) {
+            args.add("-noshadowvolumes");
         }
 
         String extra = p.getString(KEY_EXTRA_ARGS, "");
