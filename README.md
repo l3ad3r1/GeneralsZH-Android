@@ -33,6 +33,15 @@ engine with different data.
 | Campaign missions | ✅ | reaches mission intro |
 | Multiplayer | ❌ untested | ❌ untested |
 
+**Mods** load from `.gib` archives, so GenLauncher-format mods work. Rise of the
+Reds is verified playable: its own menus, factions, units and skirmish.
+
+**Shadow volumes are disabled by default** (a launcher toggle). They draw as
+opaque black geometry through DXVK on Mali, which is what most "black terrain"
+and "black model" reports were. Shadow decals are used instead and render
+correctly. A couple of Rise of the Reds buildings still render black --
+see [the known issue](docs/port/KNOWN_ISSUE_BLACK_MODELS.md).
+
 Generals is newer than Zero Hour here: it boots, renders at native resolution
 with correct terrain, and reaches a campaign mission intro. Everything marked
 "shared code" runs through the same files Zero Hour uses, so it is expected to
@@ -353,6 +362,7 @@ Getting a 2003 Windows DirectX 8 game running natively on Android required:
 |---|---|
 | [`docs/port/ANDROID_INPUT.md`](docs/port/ANDROID_INPUT.md) | The touch gesture scheme, and the four Android mouse traps that caused regressions (mice emit touch events; `SDL_HasMouse()` lies; a real mouse reports device id `0`; right-click arrives as BACK). **Read before touching input.** |
 | [`docs/port/ANDROID_FFMPEG.md`](docs/port/ANDROID_FFMPEG.md) | The two independent FFmpeg stub layers, why a stubbed build reports SUCCESS with no audio or video, and the one-command check that detects it. Also the Bink `bink` vs `binkvideo` configure trap and the soname fix. |
+| [`docs/port/KNOWN_ISSUE_BLACK_MODELS.md`](docs/port/KNOWN_ISSUE_BLACK_MODELS.md) | A few Rise of the Reds buildings render black. Open issue, with six theories already eliminated by measurement so nobody repeats the work. |
 | [`docs/port/PORTING_PLAYBOOK.md`](docs/port/PORTING_PLAYBOOK.md) | General porting workflow |
 | [`docs/port/PORTING_PATTERNS.md`](docs/port/PORTING_PATTERNS.md) | Recurring code patterns used across the port |
 | [`docs/port/RELEASE_CHECKLIST.md`](docs/port/RELEASE_CHECKLIST.md) | Steps before cutting a release |
