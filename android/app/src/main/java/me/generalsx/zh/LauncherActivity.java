@@ -65,6 +65,7 @@ public class LauncherActivity extends Activity {
     private Button playButton;
 
     private final GameDataImporter importer = new GameDataImporter();
+    private final ModDownloader downloader = new ModDownloader();
     private List<String> profiles = new ArrayList<>();
     private List<String> mods = new ArrayList<>();
 
@@ -191,6 +192,13 @@ public class LauncherActivity extends Activity {
         }), weight1());
         modRow.addView(smallButton("Remove mod", new View.OnClickListener() {
             @Override public void onClick(View v) { confirmRemoveMod(); }
+        }), weight1());
+
+        LinearLayout dlRow = new LinearLayout(this);
+        dlRow.setOrientation(LinearLayout.HORIZONTAL);
+        root.addView(dlRow, rowParams());
+        dlRow.addView(smallButton("Download mod…", new View.OnClickListener() {
+            @Override public void onClick(View v) { showDownloadPicker(); }
         }), weight1());
 
         // ---- options ----
@@ -514,6 +522,104 @@ public class LauncherActivity extends Activity {
         progress.setVisibility(busy ? View.VISIBLE : View.GONE);
         progress.setProgress(0);
         playButton.setEnabled(!busy && !profiles.isEmpty());
+    }
+
+    /**
+     * Pick a mod to download.
+     *
+     * Files come from the GenLauncher project's own host, not from ModDB --
+     * ModDB has no download API, blocks automated clients, and serves Windows
+     * installers. See ModDownloader for the details and the integrity caveat.
+     */
+    private void showDownloadPicker() {
+        final File modsRoot = LauncherConfig.modsRoot(this);
+        if (modsRoot == null) { toast("External storage unavailable."); return; }
+
+        final ModDownloader.Catalog[] cat = ModDownloader.CATALOG;
+        final String[] labels = new String[cat.length];
+        for (int i = 0; i < cat.length; i++) labels[i] = cat[i].toString();
+
+        new AlertDialog.Builder(this)
+            .setTitle("Download a mod")
+            .setItems(labels, new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int which) {
+                    askSizeThenConfirm(cat[which], new File(modsRoot, cat[which].name));
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /**
+     * Ask the host how big this entry really is, then confirm.
+     *
+     * GeneralsX @bugfix android-port 08/04/2026 The confirmation dialog used to
+     * say "Rise of the Reds is about 1.5 GB" whichever entry you picked, which
+     * was simply false for the other eight -- some are a single file of a few MB.
+     * A download prompt that misstates the size is worse than no size at all,
+     * since it is exactly the number someone checks before using mobile data.
+     */
+    private void askSizeThenConfirm(final ModDownloader.Catalog entry, final File dest) {
+        setBusy(true);
+        statusText.setText("Checking size of " + entry.name + "…");
+        downloader.querySize(entry, new ModDownloader.SizeListener() {
+            @Override public void onSize(boolean ok, int files, long bytes, String error) {
+                setBusy(false);
+                if (!ok) {
+                    statusText.setText("Could not reach the mod host.");
+                    new AlertDialog.Builder(LauncherActivity.this)
+                        .setTitle("Cannot reach the mod host")
+                        .setMessage(error)
+                        .setPositiveButton("OK", null)
+                        .show();
+                    return;
+                }
+                updateSummary();
+                confirmDownload(entry, dest, files, bytes);
+            }
+        });
+    }
+
+    private void confirmDownload(final ModDownloader.Catalog entry, final File dest,
+                                 int files, long bytes) {
+        String size = ModDownloader.human(bytes);
+        new AlertDialog.Builder(this)
+            .setTitle("Download " + entry.name + "?")
+            .setMessage(files + " file" + (files == 1 ? "" : "s") + ", " + size
+                      + " total.\n\n"
+                      + "These files are hosted by the GenLauncher project, not by this app "
+                      + "and not by ModDB.\n\n"
+                      + "The connection is plain HTTP, so every file is checked against its "
+                      + "published MD5 after download and discarded if it does not match.\n\n"
+                      + "Use Wi-Fi if you are paying for data.")
+            .setPositiveButton("Download " + size,
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        startDownload(entry, dest);
+                    }
+                })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void startDownload(ModDownloader.Catalog entry, File dest) {
+        setBusy(true);
+        statusText.setText("Preparing to download " + entry.name + "…");
+        downloader.download(entry, dest, new ModDownloader.Listener() {
+            @Override public void onProgress(String message, int percent) {
+                statusText.setText(message);
+                progress.setProgress(percent);
+            }
+            @Override public void onFinished(boolean ok, String message) {
+                setBusy(false);
+                refresh();
+                new AlertDialog.Builder(LauncherActivity.this)
+                    .setTitle(ok ? "Download complete" : "Download failed")
+                    .setMessage(message)
+                    .setPositiveButton("OK", null)
+                    .show();
+            }
+        });
     }
 
     private void confirmRemoveMod() {

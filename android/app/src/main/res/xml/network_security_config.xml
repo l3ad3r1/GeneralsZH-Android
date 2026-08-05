@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GeneralsX @feature android-port 08/04/2026
+
+  Android 9+ blocks cleartext HTTP for apps targeting API 28 and above, which is
+  the right default. The mod host GenLauncher uses (gen.insave.ovh, MinIO on port
+  9000) serves plain HTTP only - there is no TLS listener on that port - so mod
+  downloads fail with
+
+      java.io.IOException: Cleartext HTTP traffic to gen.insave.ovh not permitted
+
+  The exemption below is scoped to that single domain. Everything else in the app
+  keeps the secure default: this is deliberately NOT android:usesCleartextTraffic
+  on <application>, which would have opened up every host the app ever talks to
+  in order to fix one.
+
+  Because the transport is unauthenticated, ModDownloader verifies each file's
+  MD5 against the ETag published in the S3 listing and discards mismatches. That
+  catches corruption and casual tampering; it is not equivalent to TLS, since an
+  attacker who can rewrite the download can rewrite the listing too. If the host
+  ever gains a TLS endpoint, delete this file, drop the manifest attribute, and
+  switch ModDownloader.HOST to https - nothing else needs to change.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">gen.insave.ovh</domain>
+    </domain-config>
+</network-security-config>
