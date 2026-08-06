@@ -20,9 +20,13 @@ with their own menus, factions and skirmishes.
 
 1. **Black models — Rise of the Reds only.** Two buildings (coal power plant,
    barracks) draw solid black while casting correct shadows. See
-   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md` for the six theories already
-   eliminated by measurement. **ShockWave shows none of this**, on the same
-   engine with the same shader failures, so it is specific to RotR's assets.
+   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md` — ten theories eliminated with
+   evidence, including an offline comparison of the actual `.gib` assets which
+   found the black and working models structurally identical. ShockWave shows
+   none of it. A mesh-name probe exists behind `-DGX_TRACE_MESH`; the run to
+   finish is: RotR mod, Russia skirmish, **build a coal power plant** (a fresh
+   base has none), then read the `GX-MESH` log. Raise the log buffer with
+   `adb logcat -G 64M` first.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The
@@ -61,6 +65,11 @@ with their own menus, factions and skirmishes.
   `chmod -R 777`. Files the app created cannot be chmod'd by shell -- that
   direction is fine and expected.
 - **`adb` is a Windows binary**: give it `C:/...` paths, not MSYS `/c/...`.
+- **`adb logcat`'s default buffer is 256 KiB** and silently rotates a per-draw
+  trace away in seconds. `adb logcat -G 64M` before any high-volume tracing.
+- **Cap diagnostic traces per unique key, never globally.** A flat line cap is
+  spent on a match's opening seconds, so whatever you are actually investigating
+  never gets logged.
 - **A busy spinner is not evidence of success.** A "download" once ran to
   completion visually while cleartext HTTP had blocked it and nothing was
   written. Check the destination.

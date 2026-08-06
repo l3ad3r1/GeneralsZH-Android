@@ -41,6 +41,9 @@
 //#define ENABLE_STRIPING
 
 #include "dx8renderer.h"
+#if defined(__ANDROID__) && defined(GX_TRACE_MESH)
+#include <android/log.h>
+#endif
 #include "dx8wrapper.h"
 #include "dx8polygonrenderer.h"
 #include "dx8vertexbuffer.h"
@@ -1743,6 +1746,69 @@ void DX8TextureCategoryClass::Render()
 		}
 
 		SNAPSHOT_SAY(("mesh = %s",mesh->Get_Name()));
+
+#if defined(__ANDROID__) && defined(GX_TRACE_MESH)
+		// GeneralsX @diagnostic android-port 08/06/2026 Name the meshes that draw
+		// with NO texture bound on stage 0.
+		//
+		// Opt-in: build with -DGX_TRACE_MESH to enable. Kept in the tree rather
+		// than deleted because the black-model investigation is unfinished and
+		// this is the probe it needs; compiled out so release builds carry no
+		// per-draw logging. Enable with:
+		//     add "-DGX_TRACE_MESH" to cppFlags in android/app/build.gradle
+		// and raise the log buffer first: adb logcat -G 64M (the default 256 KiB
+		// rotates the trace away within seconds).
+		//
+		// Chasing buildings that render solid black. Everything else has been
+		// eliminated by measurement (see docs/port/KNOWN_ISSUE_BLACK_MODELS.md):
+		// textures all load, formats are ordinary DXT, materials and passes match
+		// buildings that render fine, and the missing-texture placeholder is
+		// magenta rather than black. An untextured draw with a modulate shader is
+		// the remaining way to get black, and this is the point where the texture
+		// for a batch is actually bound -- so if stage 0 is null here, every mesh
+		// in this batch draws black and gets named.
+		//
+		// Also logs each mesh once regardless, so the affected model can be
+		// identified rather than guessed at from screenshots. The names in the
+		// known-issue doc were inferred by eye and have never been confirmed.
+		{
+			// Deduplicate by mesh name rather than capping globally. A flat cap
+			// is useless here: the scene draws ~100 meshes per frame at 30fps, so
+			// any budget is spent on the opening seconds and a building placed a
+			// minute later -- exactly the one being investigated -- never gets
+			// logged. Keyed on a cheap hash of the name so a long match cannot
+			// grow this without bound.
+			static unsigned s_seen[2048];
+			static int s_seenCount = 0;
+			static int s_nullTrace = 0;
+
+			const char *mname = mesh->Get_Name() ? mesh->Get_Name() : "(null)";
+			unsigned h = 2166136261u;                       // FNV-1a
+			for (const char *c = mname; *c; ++c) { h ^= (unsigned char)*c; h *= 16777619u; }
+
+			bool fresh = true;
+			for (int q = 0; q < s_seenCount; ++q) {
+				if (s_seen[q] == h) { fresh = false; break; }
+			}
+			if (fresh && s_seenCount < (int)(sizeof(s_seen)/sizeof(s_seen[0]))) {
+				s_seen[s_seenCount++] = h;
+			}
+
+			const bool noTex = (Peek_Texture(0) == nullptr);
+			if (noTex && s_nullTrace < 400) {
+				__android_log_print(ANDROID_LOG_WARN, "GX-MESH",
+					"UNTEXTURED mesh='%s' pass=%d shader=0x%x",
+					mname, (int)pass, (unsigned)Get_Shader().Get_Bits());
+				++s_nullTrace;
+			} else if (fresh) {
+				__android_log_print(ANDROID_LOG_INFO, "GX-MESH",
+					"mesh='%s' tex0='%s' pass=%d shader=0x%x",
+					mname,
+					Peek_Texture(0) ? Peek_Texture(0)->Get_Texture_Name().str() : "NULL",
+					(int)pass, (unsigned)Get_Shader().Get_Bits());
+			}
+		}
+#endif
 
 		#ifdef WWDEBUG
 		// Debug rendering: if it exists, expose prelighting on this mesh by disabling all base textures.

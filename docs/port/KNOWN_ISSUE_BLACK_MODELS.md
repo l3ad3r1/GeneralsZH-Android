@@ -49,6 +49,34 @@ repeats the work:
 
 ---
 
+## The mesh probe, and how to run it
+
+`DX8TextureCategoryClass::Render()` in `dx8renderer.cpp` carries an opt-in trace,
+compiled out unless you build with `-DGX_TRACE_MESH` (add it to `cppFlags` in
+`android/app/build.gradle`). It is the right hook because it is where a batch's
+texture is actually bound, in the same loop that has `mesh->Get_Name()`, so it
+can name meshes *and* say what texture they drew with:
+
+```
+GX-MESH: UNTEXTURED mesh='...' pass=N shader=0x...      <- draws black
+GX-MESH: mesh='...' tex0='...' pass=N shader=0x...      <- once per distinct mesh
+```
+
+Two things to know before using it, both learned the hard way:
+
+- **Raise the log buffer first: `adb logcat -G 64M`.** The default is 256 KiB and
+  rotates a per-draw trace away within seconds. A full capture was lost to this.
+- **The trace dedupes by mesh name and must stay that way.** An earlier version
+  used a flat 1500-line cap, which the opening seconds of a match consume
+  entirely — so a building placed a minute later, which is exactly the subject,
+  never appeared. Two runs were wasted before that was obvious.
+
+Partial result so far: **0 `UNTEXTURED` draws across roughly 1600 mesh draws**
+over two runs. That does *not* yet count as eliminating untextured draws,
+because neither run had a black building on screen — a fresh RotR skirmish
+starts with only a command bunker, and the coal power plant has to be built
+before the failure is visible. Finish that run before trusting the number.
+
 ## The assets are not the difference
 
 It is tempting to conclude "RotR's models are unusual" because ShockWave is
