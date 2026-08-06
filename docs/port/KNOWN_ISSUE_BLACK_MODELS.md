@@ -41,8 +41,31 @@ repeats the work:
 | Stencil shadow volumes | Disabling them fixed the large black areas; these specific models stayed black. |
 | Terrain LOD selection | Instrumented `BaseHeightMapRenderObjClass::adjustTerrainLOD()`; it never fires. The full `HeightMapRenderObjClass` is already in use. |
 | `.gib` archives not loading | The mod's own menu art, faction UI and units all render — those assets live inside the `.gib` files. |
+| Mods in general | **ShockWave shows no black models at all** — same engine, same failed shaders, full skirmish. So this is not a generic mod problem. |
+| The model's material setup | Extracted `RBPwrPlnt.W3D` and `RBBarracks.W3D` (black) and `RBWarfct.W3D` / `RBSuplyCntr.W3D` (fine) from `!Rotr_W3D.gib` and compared: **identical** `W3dShaderStruct` combinations. |
+| Texture format | Their DDS files are the same formats and sizes. `RBWarf.dds` (works) is the same 512×512 DXT3 as `RBCPwrPlnt1.dds` (black). All present, all power-of-two, same mip counts. |
+| Multi-pass / multi-texture materials | All four models are **1 material pass, 1 texture stage per mesh**. No bump-map or multi-pass path involved. |
+| Black vertex colours | Ambient and diffuse are `(255,255,255)` on every vertex material in all four. Not a black-diffuse modulate. |
 
 ---
+
+## The assets are not the difference
+
+It is tempting to conclude "RotR's models are unusual" because ShockWave is
+clean. An offline comparison of the actual `.gib` contents says otherwise: on
+every dimension that could plausibly produce a black surface — shader structs,
+texture formats, pass and stage counts, vertex material colours — the black
+models and the working ones from the same mod are the same. Whatever differs is
+not visible in the model files.
+
+One caveat on that comparison, stated because it matters: the affected models
+were identified **by eye** from screenshots (smokestacks plus an in-game
+"Construction Complete: Coal Power Plant" message → `RBPwrPlnt`; the other →
+`RBBarracks`). That inference was never confirmed against what the renderer
+actually drew. If it is wrong, the comparison above compared the wrong files and
+proves nothing. Confirming the real model names — by logging the mesh name at
+draw time for a black mesh — is the cheapest way to put that beyond doubt, and
+should probably come before any more analysis.
 
 ## Most likely remaining cause
 
