@@ -20,13 +20,16 @@ with their own menus, factions and skirmishes.
 
 1. **Black models — Rise of the Reds only.** Two buildings (coal power plant,
    barracks) draw solid black while casting correct shadows. See
-   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md` — ten theories eliminated with
-   evidence, including an offline comparison of the actual `.gib` assets which
-   found the black and working models structurally identical. ShockWave shows
-   none of it. A mesh-name probe exists behind `-DGX_TRACE_MESH`; the run to
-   finish is: RotR mod, Russia skirmish, **build a coal power plant** (a fresh
-   base has none), then read the `GX-MESH` log. Raise the log buffer with
-   `adb logcat -G 64M` first.
+   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`. The `-DGX_TRACE_MESH` run is
+   **done** (07/08/2026): the black object is confirmed to be `RBPWRPLNT`, every
+   one of its meshes binds a real texture (`0 UNTEXTURED` in the whole run), and
+   its shader `0x9441b` is the same one 134 correctly-rendered meshes in the
+   scene use. Mesh, material, pass count and shader are therefore all
+   eliminated; what is left is the **texture object itself** — everything
+   carrying `rbcpwrplnt1.tga` / `rbcpwrplnt2.tga` is black while sibling meshes
+   of the same object on other textures (`rbfence3.tga`, `tesla*.tga`) render.
+   Next probe: log the bound D3D surface's size/format/mips/pool, and its first
+   texels, for those textures versus `rbfence3`.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The

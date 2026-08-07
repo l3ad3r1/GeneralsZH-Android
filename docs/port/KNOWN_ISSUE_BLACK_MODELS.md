@@ -71,11 +71,62 @@ Two things to know before using it, both learned the hard way:
   entirely — so a building placed a minute later, which is exactly the subject,
   never appeared. Two runs were wasted before that was obvious.
 
-Partial result so far: **0 `UNTEXTURED` draws across roughly 1600 mesh draws**
-over two runs. That does *not* yet count as eliminating untextured draws,
-because neither run had a black building on screen — a fresh RotR skirmish
-starts with only a command bunker, and the coal power plant has to be built
-before the failure is visible. Finish that run before trusting the number.
+### Result of the finished run (07/08/2026, TCL NXTPAPER)
+
+The run was completed with a black coal power plant on screen for its whole
+duration. Two things came out of it, and together they move the investigation
+off the material path entirely.
+
+**1. The model names were guessed right.** The renderer names the black object
+`RBPWRPLNT` at draw time, so the by-eye identification below — and the asset
+comparison built on it — stands.
+
+**2. Untextured draws are eliminated.** `0 UNTEXTURED` across the entire run,
+*with the black building visible*. Every sub-mesh of the plant binds a real
+texture on stage 0:
+
+```
+mesh='RBPWRPLNT.COALPLANT'     tex0='rbcpwrplnt1.tga'  pass=0 shader=0x9441b
+mesh='RBPWRPLNT.WIRES'         tex0='rbcpwrplnt1.tga'  pass=0 shader=0x5441b
+mesh='RBPWRPLNT.TWRSCFLD02'    tex0='rbcpwrplnt1.tga'  pass=0 shader=0x5441b
+mesh='RBPWRPLNT.CPFOUNDATION'  tex0='rbcpwrplnt2.tga'  pass=0 shader=0x9441b
+mesh='RBPWRPLNT.FENCE'         tex0='rbfence3.tga'     pass=0 shader=0xd441b
+mesh='RBPWRPLNT.TESLA01'       tex0='tesla5.tga'       pass=0 shader=0x94433
+```
+
+**3. The shader is not the difference either.** `0x9441b` — the shader on the
+black `COALPLANT` and `CPFOUNDATION` — is the ordinary shader of this scene:
+134 of the 161 distinct meshes logged use it, including every mesh of the
+command bunker standing next to the plant and rendering correctly.
+
+**4. The split inside one object is by texture, not by mesh or shader.** On the
+same object, in the same frame: `FENCE` (`rbfence3.tga`) draws its chain-link
+texture, the `TESLA*` meshes draw their blue arcs — and everything carrying
+`rbcpwrplnt1.tga` or `rbcpwrplnt2.tga` is solid black. See the screenshots in
+this run: the perimeter fence and the tesla effect are plainly visible against a
+black plant body.
+
+So the surviving mechanism is narrow: **the texture is bound, is not null, and
+still shades black.** That is a property of the texture object's contents (or of
+what DXVK/Mali does with this particular surface), not of the mesh, the material,
+the pass count or the shader — all of which now match meshes that render.
+
+### What to probe next
+
+Stop instrumenting the material path; it is clean. Instrument the *texture* for
+`rbcpwrplnt1` / `rbcpwrplnt2`: at bind time log the D3D surface description
+actually in hand — width, height, format, mip count, pool — and compare it with
+`rbfence3`, which draws correctly from the same object and the same archive. If
+those descriptions match, read back the first mip's top-left texels; a texture
+whose description is right but whose pixels are zero means the upload, not the
+load, is what failed. Note that `TextureLoadTaskClass::Load()` reporting success
+for all 59 textures does not contradict this — it says the load path returned
+OK, not that the surface reached the GPU with data.
+
+The other black building (the barracks) has not been confirmed by name at draw
+time. Doing so, and recording which texture *its* black meshes bind, is the
+cheapest way to check whether "a specific pair of DDS files" or "a class of DDS
+files" is the right description of the fault.
 
 ## The assets are not the difference
 
@@ -95,9 +146,9 @@ proves nothing. Confirming the real model names — by logging the mesh name at
 draw time for a black mesh — is the cheapest way to put that beyond doubt, and
 should probably come before any more analysis.
 
-## Most likely remaining cause
+## Previously suspected, now ruled out
 
-The material/shader path for those particular meshes. Three pixel shaders fail to
+The material/shader path was the standing hypothesis: three pixel shaders fail to
 create on this device, on every install, because the shipped `shaders.big` /
 `ShadersZH.big` are ~1 KB stubs:
 
@@ -107,23 +158,19 @@ Failed to create PIXEL shader: 'shaders\roadnoise2.pso'  hr=0x8876086c
 Failed to create PIXEL shader: 'shaders\monochrome.pso'  hr=0x8876086c
 ```
 
-Vanilla assets never depend on those, so they degrade cleanly. Rise of the Reds
-uses more elaborate multi-pass and multi-texture materials, and the hypothesis is
-that one such material resolves to no valid pass here and draws black.
-
-That is a hypothesis, not a finding. It has not been tested.
+The idea was that Rise of the Reds uses more elaborate multi-pass materials and
+one of them resolves to no valid pass here. The finished mesh-probe run rules
+that out: the black meshes are single-pass, single-stage, and carry the same
+shader bits (`0x9441b`) as the 134 meshes in the scene that render correctly.
 
 ---
 
 ## How to continue
 
-Instrument the material/shader application in `DX8Wrapper` to log, per mesh at
-draw time, which shader and texture stages are requested and whether the setup
-succeeded. Then compare a black RotR building against a working one in the same
-frame — the difference in that log is the answer.
+See "What to probe next" above: the material path is clean, so the next probe
+belongs on the bound texture's surface description and contents, not on shader
+or pass selection.
 
-This is per-frame instrumentation, so cap the output or gate it behind a flag;
-the texture-load trace above already needed a 4000-line cap.
-
-Reproduce with: Rise of the Reds installed as a mod, any skirmish as Russia. The
-coal power plant is black within the first minute of building it.
+Reproduce with: Rise of the Reds installed as a mod, any skirmish as Russia. A
+Russia start on `Desert Fury [GEN] (2)` already includes a coal power plant, so
+the failure is on screen the moment the match loads — no need to build one.
