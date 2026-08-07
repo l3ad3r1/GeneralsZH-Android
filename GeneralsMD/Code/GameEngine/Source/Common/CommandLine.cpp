@@ -401,6 +401,8 @@ Int parseNoShadows(char *args[], int)
 {
 	TheWritableGlobalData->m_useShadowVolumes = false;
 	TheWritableGlobalData->m_useShadowDecals = false;
+	// Latch it: the LOD table and Options.ini both reassign these later.
+	TheWritableGlobalData->m_shadowsForcedOff = true;
 
 	return 1;
 }
@@ -1169,6 +1171,15 @@ static CommandLineParam paramsForEngineInit[] =
 {
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-noshellmap", parseNoShellMap },
+	// GeneralsX @bugfix android-port 08/07/2026 Moved out of the RTS_DEBUG
+	// block. It was only ever registered in debug builds, so in every shipped
+	// APK the launcher's "Disable shadow volumes" switch parsed as an unknown
+	// argument and was skipped -- measured on a TCL NXTPAPER: the flag arrives
+	// in argv, parseNoShadows never runs, and m_useShadowVolumes still reads 1
+	// inside W3DVolumetricShadowManager::renderShadows(). Stencil volumes draw
+	// as opaque black geometry through DXVK on Mali, which is the whole reason
+	// the switch exists.
+	{ "-noshadowvolumes", parseNoShadows },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-xres", parseXRes },
 	{ "-yres", parseYRes },
@@ -1292,7 +1303,6 @@ static CommandLineParam paramsForEngineInit[] =
 #endif
 	{ "-forceBenchmark", parseForceBenchmark },
 	{ "-buildmapcache", parseBuildMapCache },
-	{ "-noshadowvolumes", parseNoShadows },
 	{ "-nofx", parseNoFX },
 	{ "-ignoresync", parseSync },
 	{ "-shellmap", parseShellMap },

@@ -1794,6 +1794,15 @@ void DX8TextureCategoryClass::Render()
 			unsigned h = 2166136261u;                       // FNV-1a
 			for (const char *c = mname; *c; ++c) { h ^= (unsigned char)*c; h *= 16777619u; }
 
+			// The key must include the pass and the shader, not just the name.
+			// Keyed on the name alone, the SECOND material pass of a mesh is
+			// dropped as a duplicate of the first -- so a pass that draws over
+			// the base one, which is a way to get black that survives swapping
+			// the base texture, could never appear in this trace. That blind
+			// spot went unnoticed through several rounds of this investigation.
+			h ^= (unsigned)pass * 0x9E3779B9u;
+			h ^= Get_Shader().Get_Bits() * 0x85EBCA6Bu;
+
 			bool fresh = true;
 			for (int q = 0; q < s_seenCount; ++q) {
 				if (s_seen[q] == h) { fresh = false; break; }
@@ -1862,6 +1871,15 @@ void DX8TextureCategoryClass::Render()
 				// whose LightEnvironment has no lights and a black ambient shades
 				// to black under a lit material, no matter how healthy everything
 				// else is.
+				// Batches are grouped by FVF as well as by texture/material/shader,
+				// so two batches that match on everything logged above can still be
+				// feeding the pipe different vertex layouts. If one carries a
+				// D3DFVF_DIFFUSE the filler never wrote -- these meshes declare no
+				// colour channel in their .w3d -- then whatever COLORVERTEX and the
+				// material colour sources make of that zero is the colour that gets
+				// drawn. That is the one per-batch variable not yet compared.
+				const unsigned fvf = Get_Container() ? Get_Container()->Get_FVF() : 0u;
+
 				LightEnvironmentClass *le = mesh->Get_Lighting_Environment();
 				Vector3 leAmb(0, 0, 0), leL0(0, 0, 0), leD0(0, 0, 0);
 				int leCount = -1;
@@ -1880,7 +1898,8 @@ void DX8TextureCategoryClass::Render()
 					"amb=(%.2f,%.2f,%.2f) dif=(%.2f,%.2f,%.2f) emi=(%.2f,%.2f,%.2f) "
 					"spc=(%.2f,%.2f,%.2f) op=%.2f shin=%.1f src(a/d/e)=%d/%d/%d "
 					"| lenv=%d amb=(%.2f,%.2f,%.2f) l0=(%.2f,%.2f,%.2f) dir0=(%.2f,%.2f,%.2f) "
-					"| uvsrc=%d/%d mapper=%d/%d",
+					"| uvsrc=%d/%d mapper=%d/%d "
+					"| fvf=0x%x(N%d D%d S%d) colorvtx=%d dsrc=%d asrc=%d esrc=%d rsamb=0x%08x",
 					mname, tex0->Get_Texture_Name().str(), (void *)d3d0,
 					(int)tex0->Is_Initialized(), (int)tex0->Is_Missing_Texture(),
 					tex0->Get_Width(), tex0->Get_Height(),
@@ -1898,7 +1917,14 @@ void DX8TextureCategoryClass::Render()
 					leL0.X, leL0.Y, leL0.Z, leD0.X, leD0.Y, leD0.Z,
 					vm ? vm->Get_UV_Source(0) : -1, vm ? vm->Get_UV_Source(1) : -1,
 					(vm && vm->Peek_Mapper(0)) ? vm->Peek_Mapper(0)->Mapper_ID() : -1,
-					(vm && vm->Peek_Mapper(1)) ? vm->Peek_Mapper(1)->Mapper_ID() : -1);
+					(vm && vm->Peek_Mapper(1)) ? vm->Peek_Mapper(1)->Mapper_ID() : -1,
+					fvf, (int)!!(fvf & D3DFVF_NORMAL), (int)!!(fvf & D3DFVF_DIFFUSE),
+					(int)!!(fvf & D3DFVF_SPECULAR),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_COLORVERTEX),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_DIFFUSEMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENTMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_EMISSIVEMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENT));
 			}
 
 		}

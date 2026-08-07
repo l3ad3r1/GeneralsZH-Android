@@ -51,6 +51,9 @@
 #include "d3dx8math.h"
 #include "Common/GlobalData.h"
 #include "Common/DrawModule.h"
+#if defined(__ANDROID__) && defined(GX_TRACE_MESH)
+#include <android/log.h>
+#endif
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "WW3D2/statistics.h"
@@ -3434,6 +3437,32 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
  	beX = bbox.Extent.X;
  	beY = bbox.Extent.Y;
  	beZ = bbox.Extent.Z;
+
+#if defined(__ANDROID__) && defined(GX_TRACE_MESH)
+	// GeneralsX @diagnostic android-port 08/07/2026 Is -noshadowvolumes still in
+	// force by the time a match renders?
+	//
+	// CommandLine.cpp clears m_useShadowVolumes at startup, but
+	// GameLOD::setStaticLODLevel() assigns it straight back from the LOD table
+	// (GameLOD.cpp:599), and OptionPreferences does the same at :396. Both run
+	// after the command line is parsed, so the flag the launcher sets is not
+	// necessarily the flag this function reads. Stencil volumes draw as opaque
+	// black geometry through DXVK on Mali -- which is what the black buildings
+	// look like -- so whether this is on at match time is worth knowing rather
+	// than assuming.
+	{
+		static int s_said = 0;
+		if (s_said < 3) {
+			++s_said;
+			__android_log_print(ANDROID_LOG_WARN, "GX-SHADOW",
+				"renderShadows: useShadowVolumes=%d useShadowDecals=%d forcedOff=%d list=%p stencil=%d",
+				(int)TheGlobalData->m_useShadowVolumes,
+				(int)TheGlobalData->m_useShadowDecals,
+				(int)TheGlobalData->m_shadowsForcedOff,
+				(void *)m_shadowList, (int)DX8Wrapper::Has_Stencil());
+		}
+	}
+#endif
 
 	if (m_shadowList && TheGlobalData->m_useShadowVolumes)
 	{

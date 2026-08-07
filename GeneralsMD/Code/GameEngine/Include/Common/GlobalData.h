@@ -150,6 +150,17 @@ public:
 	Bool m_useCloudPlane;
 	Bool m_useShadowVolumes;
 	Bool m_useShadowDecals;
+	// GeneralsX @bugfix android-port 08/07/2026 Latch for -noshadowvolumes.
+	// Without it the switch does not survive to the first frame of a match:
+	// CommandLine clears m_useShadowVolumes at startup, then
+	// GameLOD::setStaticLODLevel() assigns it back from the LOD table and
+	// OptionPreferences assigns it back from Options.ini, both after the command
+	// line has been parsed. Measured on a TCL NXTPAPER: launched with
+	// -noshadowvolumes, m_useShadowVolumes reads 1 inside
+	// W3DVolumetricShadowManager::renderShadows(). Stencil volumes draw as
+	// opaque black geometry through DXVK on Mali, which is exactly what the
+	// switch exists to avoid.
+	Bool m_shadowsForcedOff;
 	Int  m_textureReductionFactor;	//how much to cut texture resolution: 2 is half, 3 is quarter, etc.
 	Bool m_enableBehindBuildingMarkers;
 	Real m_waterPositionX;

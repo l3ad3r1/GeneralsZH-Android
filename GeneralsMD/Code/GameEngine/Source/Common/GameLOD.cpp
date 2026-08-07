@@ -393,8 +393,11 @@ void GameLODManager::init()
 	if (userSetDetail == STATIC_GAME_LOD_CUSTOM)
 	{
 		TheWritableGlobalData->m_textureReductionFactor = optionPref.getTextureReduction();
-		TheWritableGlobalData->m_useShadowVolumes = optionPref.get3DShadowsEnabled();
-		TheWritableGlobalData->m_useShadowDecals = optionPref.get2DShadowsEnabled();
+		if (!TheGlobalData->m_shadowsForcedOff)
+		{
+			TheWritableGlobalData->m_useShadowVolumes = optionPref.get3DShadowsEnabled();
+			TheWritableGlobalData->m_useShadowDecals = optionPref.get2DShadowsEnabled();
+		}
 		TheWritableGlobalData->m_enableBehindBuildingMarkers = optionPref.getBuildingOcclusionEnabled();
 		TheWritableGlobalData->m_maxParticleCount = optionPref.getParticleCap();
 		TheWritableGlobalData->m_enableDynamicLOD = optionPref.getDynamicLODEnabled();
@@ -596,8 +599,11 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 	if (TheGlobalData)
 	{
 		TheWritableGlobalData->m_maxParticleCount=lodInfo->m_maxParticleCount;
-		TheWritableGlobalData->m_useShadowVolumes=lodInfo->m_useShadowVolumes;
-		TheWritableGlobalData->m_useShadowDecals=lodInfo->m_useShadowDecals;
+		if (!TheGlobalData->m_shadowsForcedOff)
+		{
+			TheWritableGlobalData->m_useShadowVolumes=lodInfo->m_useShadowVolumes;
+			TheWritableGlobalData->m_useShadowDecals=lodInfo->m_useShadowDecals;
+		}
 
 		TheWritableGlobalData->m_textureReductionFactor = requestedTextureReduction;
 
