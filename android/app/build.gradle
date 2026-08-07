@@ -23,8 +23,8 @@ android {
         // libvulkan.so. DXVK requires native Vulkan; there is no fallback.
         minSdk 24
         targetSdk 35
-        versionCode 1
-        versionName "0.1-android"
+        versionCode 10
+        versionName "0.10-android"
 
         // Arm64-v8a only: the game is a desktop RTS port; skip armeabi-v7a and
         // ship x86_64 only for emulator debugging via a separate build flavor
