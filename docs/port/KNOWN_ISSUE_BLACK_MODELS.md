@@ -75,7 +75,7 @@ renders and a batch that draws black, including two batches of the same object
 in the same frame.** The fence around the plant draws its chain-link texture at
 full brightness while the plant body two metres away is pure black.
 
-### The bisection — it is not the texture, it is the geometry
+### The bisection — WRONG, see the correction below
 
 With no property left to compare, the pipe was cut in half by experiment
 instead. Two texture swaps, in one build, in `DX8TextureCategoryClass::Render()`:
@@ -97,10 +97,12 @@ it, "still black" cannot be told apart from "the swap never happened".
 - The plant stayed **pure black** while bound to a texture that was rendering
   correctly on the building next to it in the same frame.
 
-That flips the investigation. Ten months of this have been spent on textures,
-materials and shaders; the failing half is the other one. The texture, the
-material, the shader and the light environment are all fine, and something about
-the **vertex data these particular meshes present to the draw** is not.
+**This conclusion was wrong.** The control was misread: the bunker's *other*
+meshes (its striped panels and house-colour parts) were bright, and that was
+taken for `STRUCTURE01` rendering the plant's texture. `STRUCTURE01` itself was
+black even then. The re-run below, with both halves in one build and one frame,
+shows the opposite. Everything downstream of this that talks about "vertex data"
+should be read as superseded.
 
 ### What to probe next
 
@@ -359,3 +361,49 @@ or pass selection.
 Reproduce with: Rise of the Reds installed as a mod, any skirmish as Russia. A
 Russia start on `Desert Fury [GEN] (2)` already includes a coal power plant, so
 the failure is on screen the moment the match loads — no need to build one.
+
+---
+
+## The answer: the texture samples black on the GPU
+
+Experiments A and C were re-run **in one build, in one frame**, on two black
+meshes of the same object, with the bunker taking the plant's texture as the
+mechanism control:
+
+| Mesh | Override | Result |
+|---|---|---|
+| `RBPWRPLNT.COALPLANT` | good texture only (this is A) | **renders in full detail** |
+| `RBPWRPLNT.CPFOUNDATION` | good texture + emissive (this is C) | renders |
+| `RBCOMBNKR.STRUCTURE01` | the plant's `rbcpwrplnt1.tga` | **pure black** |
+
+The plant, given `rbcmdbnkr2.tga`, draws its smokestacks, panel detail, red star
+and warning stripes -- a completely normal building. The bunker, given
+`rbcpwrplnt1.tga`, goes pure black on that one mesh while its foundation, door,
+radar, crates and striped panels beside it render normally.
+
+**The blackness follows the texture.** So A's earlier result was the wrong
+observation, and the texture is the culprit after all.
+
+What that means, given everything else already measured:
+
+- The `.dds` on disk is intact and bright, at every mip level, and there is
+  exactly one copy of it across all 48 archives.
+- At draw time the `TextureClass` is healthy -- `d3d` non-null, `init=1`,
+  `missing=0`, correct dimensions and format -- and the stage states are
+  `MODULATE(TEXTURE, DIFFUSE)`, byte-identical to meshes that render.
+- Yet the thing the sampler reads is black.
+
+So the file is good and the binding is good, and **the texture's contents never
+reached the GPU**. `TextureLoadTaskClass::Load()` reporting success for all 59
+textures was never evidence against this: it says the load path returned OK, not
+that data arrived in the surface.
+
+### What to probe next
+
+Confirm it directly, then find which upload fails. At draw time, lock the bound
+`IDirect3DTexture8` for `rbcpwrplnt1` and read back the top mip's first texels;
+compare against the same texels decoded from the archive. Then instrument
+`TextureLoadTaskClass::Load()` / `Apply_New_Surface()` for that texture
+specifically -- surface description, lock pitch, and the byte count actually
+copied per mip level -- against `rbcmdbnkr2`, which takes the same path and
+works.

@@ -44,10 +44,18 @@ with their own menus, factions and skirmishes.
    no texture bound the plant lights up correctly, so lighting, normals,
    material and transform are all fine; with a good texture *and* emissive
    white it renders in full detail, so nothing is drawn over it. The black is
-   produced where the texture is combined with the lit vertex colour. Next:
-   log the stage states (`D3DTSS_COLOROP`/`COLORARG1`/`COLORARG2`/
-   `TEXCOORDINDEX`, `D3DRS_TEXTUREFACTOR`) *after*
-   `Apply_Render_State_Changes()`, which is where they are actually set.
+   produced where the texture is combined with the lit vertex colour. The stage
+   states were then read where they are actually set and are byte-identical to
+   meshes that render. **Resolved (07/08/2026):** re-running the two contradicting
+   experiments in one build and one frame settled it — give the plant a good
+   texture and it renders in full detail; give the bunker `rbcpwrplnt1.tga` and
+   that mesh goes pure black while the rest of the building is fine. The
+   blackness follows the texture. The file is intact at every mip, the binding is
+   healthy (`init=1`, `missing=0`, right format) and the stage is
+   `MODULATE(TEXTURE, DIFFUSE)` — so **the texture's contents never reach the
+   GPU**. Next: lock the bound D3D texture at draw time and read back its texels,
+   then instrument `TextureLoadTaskClass::Load()`/`Apply_New_Surface()` for that
+   texture against `rbcmdbnkr2`, which takes the same path and works.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The
