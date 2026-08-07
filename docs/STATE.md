@@ -18,38 +18,20 @@ with their own menus, factions and skirmishes.
 
 ## Open issues
 
-1. **Black models — Rise of the Reds only.** Two buildings (coal power plant,
-   barracks) draw solid black while casting correct shadows. See
-   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`. The `-DGX_TRACE_MESH` run is
-   **done** (07/08/2026): the black object is confirmed to be `RBPWRPLNT`, every
-   one of its meshes binds a real texture (`0 UNTEXTURED` in the whole run), and
-   its shader `0x9441b` is the same one 134 correctly-rendered meshes in the
-   scene use. Mesh, material, pass count and shader are therefore all
-   eliminated. A second round then read **everything the draw call is given** at
-   draw time and found it all identical to batches that render: the D3D texture
-   is bound and initialised, the .dds is intact and unique across every archive,
-   the vertex material, normals, mesh attributes, light environment, UV source
-   and shader bits all match. The fence of the *same object* draws its texture
-   at full brightness while the body is pure black. Bypassing `DX8Wrapper`'s
-   redundant-state-set cache (`-DGX_NO_STATE_CACHE`, still in the tree, off)
-   changed nothing either. A texture swap then appeared to clear the texture and
-   point at the vertex data — that reading was **wrong**, its control was misread,
-   and it is corrected below. **Update:** the failing stage was isolated. With
-   no texture bound the plant lights up correctly, so lighting, normals,
-   material and transform are all fine; with a good texture *and* emissive
-   white it renders in full detail, so nothing is drawn over it. The black is
-   produced where the texture is combined with the lit vertex colour. The stage
-   states were then read where they are actually set and are byte-identical to
-   meshes that render. **Resolved (07/08/2026):** re-running the two contradicting
-   experiments in one build and one frame settled it — give the plant a good
-   texture and it renders in full detail; give the bunker `rbcpwrplnt1.tga` and
-   that mesh goes pure black while the rest of the building is fine. The
-   blackness follows the texture. The file is intact at every mip, the binding is
-   healthy (`init=1`, `missing=0`, right format) and the stage is
-   `MODULATE(TEXTURE, DIFFUSE)` — so **the texture's contents never reach the
-   GPU**. Next: lock the bound D3D texture at draw time and read back its texels,
-   then instrument `TextureLoadTaskClass::Load()`/`Apply_New_Surface()` for that
-   texture against `rbcmdbnkr2`, which takes the same path and works.
+1. ~~**Black models — Rise of the Reds only.**~~ **FIXED 07/08/2026.**
+   `DDSFileClass::Get_4x4_Block()` had no DXT3 case — it returned without
+   writing anything, so every DXT3 texture reached the GPU as an all-zero
+   surface and drew black. DXT1 and DXT5 were implemented; DXT2/3/4 were not.
+   This device cannot sample DXT directly so everything goes through that
+   decompression path, which is why it bit here and not on desktop. Proof was a
+   texel readback of every bound texture correlated against its source format:
+   22/22 DXT1 and 6/6 DXT5 held real data, 5/5 DXT3 were 100% zero. It also
+   explains the observation that derailed the search for hours — the plant's
+   body is DXT3 and drew black while the fence around it is DXT5 and drew fine.
+   Fixed by implementing DXT2/DXT3 and routing DXT4 through the DXT5 decoder.
+   Only RotR was affected because its building textures are DXT3; vanilla and
+   ShockWave are DXT1/DXT5 throughout. Full trail in
+   `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The
@@ -73,9 +55,17 @@ with their own menus, factions and skirmishes.
   black models.
 - **Missing-texture placeholder is magenta** (`0x7FFF00FF`), not black. A black
   model is never a missing texture.
-- **Shadow volumes draw as opaque black geometry** through DXVK on Mali. That
-  was the cause of most "black terrain" reports. Fixed: launcher passes
-  `-noshadowvolumes` by default.
+- **Shadow volumes draw as opaque black geometry** through DXVK on Mali. The
+  launcher passes `-noshadowvolumes` by default — but note that flag was inert
+  in every release build until 07/08/2026 (its table entry was inside
+  `#if defined(RTS_DEBUG)`, and the LOD table and Options.ini both reassigned
+  the value afterwards), so anything previously credited to it should be
+  treated as unverified.
+- **DXT2/3/4 decompression was missing** in `DDSFileClass` until 07/08/2026 and
+  silently wrote nothing. If a texture is black, read its texels back off the
+  GPU before trusting anything the engine reports about it — `init=1`,
+  `missing=0` and a correct-looking format all held true while the surface was
+  entirely zero.
 - **`SDL_HasMouse()` returns 0 on Android** with a mouse attached, and a real
   mouse reports `SDL_MouseID` **0** -- the same value a zeroed synthetic event
   carries. Discriminate by tagging synthetic events `SDL_TOUCH_MOUSEID` instead.

@@ -1927,6 +1927,106 @@ void DX8TextureCategoryClass::Render()
 					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENT));
 			}
 
+			// Read the texels back off the GPU copy.
+			//
+			// Everything upstream is now known good: the .dds is intact at every
+			// mip and unique across all 48 archives, the TextureClass is healthy
+			// at draw time (d3d non-null, init=1, missing=0, right format), and
+			// the stage is MODULATE(TEXTURE, DIFFUSE) byte-identical to meshes
+			// that render. And the blackness follows the texture -- put
+			// rbcpwrplnt1 on the bunker and the bunker's mesh goes black, put a
+			// good texture on the plant and the plant renders. So the remaining
+			// question is whether the surface the sampler reads actually holds
+			// the file's data.
+			//
+			// Locking is safe for POOL_MANAGED (there is a system-memory copy);
+			// POOL_DEFAULT would fail, so the pool is logged either way rather
+			// than assumed. Once per distinct texture name, so the black one and
+			// several working ones land in the same run for comparison.
+			if (tex0 && d3d0) {
+				static unsigned s_seenTex[64];
+				static int s_seenTexCount = 0;
+
+				const char *tname = tex0->Get_Texture_Name().str();
+				unsigned th = 2166136261u;
+				for (const char *c = tname; c && *c; ++c) { th ^= (unsigned char)*c; th *= 16777619u; }
+
+				bool freshTex = true;
+				for (int q = 0; q < s_seenTexCount; ++q) {
+					if (s_seenTex[q] == th) { freshTex = false; break; }
+				}
+				if (freshTex && s_seenTexCount < (int)(sizeof(s_seenTex)/sizeof(s_seenTex[0]))) {
+					s_seenTex[s_seenTexCount++] = th;
+
+					IDirect3DTexture8 *d3dtex = tex0->Peek_D3D_Texture();
+					D3DSURFACE_DESC desc;
+					::ZeroMemory(&desc, sizeof(desc));
+					HRESULT hrd = d3dtex ? d3dtex->GetLevelDesc(0, &desc) : E_FAIL;
+
+					D3DLOCKED_RECT lr;
+					::ZeroMemory(&lr, sizeof(lr));
+					HRESULT hrl = d3dtex ? d3dtex->LockRect(0, &lr, nullptr, D3DLOCK_READONLY) : E_FAIL;
+
+					if (SUCCEEDED(hrl) && lr.pBits) {
+						const unsigned char *bytes = (const unsigned char *)lr.pBits;
+
+						// These surfaces come back as D3DFMT_A8R8G8B8 (21) and
+						// X8R8G8B8 (22), not DXT -- the loader decompresses. So a
+						// locked "row" is a pixel row, not a 4x4 block row, and
+						// the earlier block arithmetic scanned only the top
+						// quarter of each surface. Anything above 0x10000 is a
+						// FOURCC and really is block-compressed.
+						const bool compressed = ((unsigned)desc.Format > 0x10000u);
+						const int rows = compressed ? (int)((desc.Height + 3) / 4)
+						                            : (int)desc.Height;
+
+						long total = 0, nonZero = 0;
+						unsigned maxR = 0, maxG = 0, maxB = 0;
+						unsigned long sumR = 0, sumG = 0, sumB = 0;
+						long px = 0;
+						for (int r = 0; r < rows; ++r) {
+							const unsigned char *row = bytes + (size_t)r * lr.Pitch;
+							for (int b = 0; b < lr.Pitch; ++b) {
+								++total;
+								if (row[b] != 0) ++nonZero;
+							}
+							if (!compressed) {
+								// B,G,R,A byte order for A8R8G8B8.
+								for (unsigned x = 0; x < desc.Width; ++x) {
+									unsigned bb = row[x * 4 + 0];
+									unsigned gg = row[x * 4 + 1];
+									unsigned rr = row[x * 4 + 2];
+									if (rr > maxR) maxR = rr;
+									if (gg > maxG) maxG = gg;
+									if (bb > maxB) maxB = bb;
+									sumR += rr; sumG += gg; sumB += bb;
+									++px;
+								}
+							}
+						}
+						__android_log_print(ANDROID_LOG_WARN, "GX-TEXEL",
+							"tex='%s' pool=%d %ux%u fmt=%u pitch=%d rows=%d bytes=%ld "
+							"nonzero=%ld (%ld%%) meanRGB=(%lu,%lu,%lu) maxRGB=(%u,%u,%u) "
+							"first16=%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+							tname, (int)tex0->Get_Pool(), desc.Width, desc.Height,
+							(unsigned)desc.Format, (int)lr.Pitch, rows, total, nonZero,
+							total ? (nonZero * 100 / total) : 0,
+							px ? sumR / px : 0UL, px ? sumG / px : 0UL, px ? sumB / px : 0UL,
+							maxR, maxG, maxB,
+							bytes[0], bytes[1], bytes[2], bytes[3],
+							bytes[4], bytes[5], bytes[6], bytes[7],
+							bytes[8], bytes[9], bytes[10], bytes[11],
+							bytes[12], bytes[13], bytes[14], bytes[15]);
+						d3dtex->UnlockRect(0);
+					} else {
+						__android_log_print(ANDROID_LOG_WARN, "GX-TEXEL",
+							"tex='%s' pool=%d LOCK FAILED hr=0x%08x (desc hr=0x%08x %ux%u fmt=%u)",
+							tname, (int)tex0->Get_Pool(), (unsigned)hrl, (unsigned)hrd,
+							desc.Width, desc.Height, (unsigned)desc.Format);
+					}
+				}
+			}
+
 		}
 #endif
 

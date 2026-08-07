@@ -1,11 +1,59 @@
 # Known issue: a few Rise of the Reds buildings render black
 
-**Status:** open. Affects Rise of the Reds only. Vanilla Zero Hour and vanilla
-Generals are unaffected.
+**Status: FIXED**, 07/08/2026. Kept in full because the elimination trail below
+is worth more than the answer, and because two of its conclusions were wrong in
+instructive ways.
 
-**Impact:** two structures observed so far (the Russian coal power plant and the
-barracks) draw as solid black silhouettes. Everything else in the mod — units,
-command centre, menus, UI, terrain — renders correctly, and the mod is playable.
+## The cause, in one line
+
+`DDSFileClass::Get_4x4_Block()` had no DXT3 case — it did `return false` without
+writing anything to the destination surface, so every DXT3 texture reached the
+GPU as an untouched (all-zero) buffer and drew solid black.
+
+```cpp
+case WW3D_FORMAT_DXT2:
+    return false;
+case WW3D_FORMAT_DXT3:
+    return false;      // <- destination surface never written
+case WW3D_FORMAT_DXT4:
+    return false;
+case WW3D_FORMAT_DXT5:
+    { ...full implementation... }
+```
+
+DXT1 and DXT5 were both implemented, DXT2/3/4 were not. This device cannot
+sample DXT directly, so *every* texture goes through this decompression path —
+which is why it bites here and not on desktop.
+
+**The proof.** Locking each bound texture at draw time and reading its texels
+back, correlated against the source format in the archive:
+
+```
+DXT1: 22 textures,  0 read back ALL ZERO
+DXT5:  6 textures,  0 read back ALL ZERO
+DXT3:  5 textures,  5 read back ALL ZERO   <<<
+```
+
+No exceptions in either direction. And it explains the one observation that
+derailed this for hours: the coal plant's **body** is `rbcpwrplnt1.dds` (DXT3)
+and drew black, while the **fence around it** is `rbfence3.dds` (DXT5) and drew
+normally — same object, same frame, same material, same shader.
+
+Fixed by implementing DXT2/DXT3 in both `Get_4x4_Block()` and `Get_Pixel()`, and
+routing DXT4 through the DXT5 decoder (identical layout, premultiplied alpha).
+Verified on device: all five DXT3 textures now read back with real data whose
+mean RGB matches the file decoded offline, and the plant, the barracks, the
+bunker's fence and radar, and the house-colour parts all render.
+
+Why only Rise of the Reds: its building textures happen to be DXT3, while
+vanilla and ShockWave use DXT1/DXT5 almost throughout. Nothing about the mod was
+ever wrong.
+
+---
+
+**Original report, and the trail.** Two structures (the Russian coal power plant
+and the barracks) drew as solid black silhouettes. Everything else in the mod —
+units, command centre, menus, UI, terrain — rendered correctly.
 
 ---
 
