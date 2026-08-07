@@ -47,6 +47,75 @@ repeats the work:
 | Multi-pass / multi-texture materials | All four models are **1 material pass, 1 texture stage per mesh**. No bump-map or multi-pass path involved. |
 | Black vertex colours | Ambient and diffuse are `(255,255,255)` on every vertex material in all four. Not a black-diffuse modulate. |
 
+### Second round, 07/08/2026 — everything the draw call is given
+
+All of the following were read **at draw time, on device**, from the probe in
+`DX8TextureCategoryClass::Render()`, comparing `RBPWRPLNT.COALPLANT` (black)
+against `RBCOMBNKR.STRUCTURE01` (renders, same faction, same frame, adjacent on
+the map) and against `RBPWRPLNT.FENCE` (renders, **same object**):
+
+| Theory | How it was eliminated |
+|---|---|
+| No texture bound | `0 UNTEXTURED` across every run once a black building was on screen. |
+| Texture bound but no D3D surface | Added a `NOD3D` check on `Peek_D3D_Base_Texture()` — the thing `Apply()` actually binds, and not the same as a non-null `TextureClass`. **`0 NOD3D`.** The black meshes carry `d3d=0xb400…` `init=1` `missing=0` `512x512` with the right format. |
+| The .dds is corrupt or black | Decoded `RBCPwrPlnt1.dds` offline: an intact 512×512 DXT3 brick-and-signage atlas, mean RGB (47,41,38) — *brighter* than `RBCmdBnkr1.dds` (23,22,20), which renders. |
+| A duplicate texture from another archive wins | Indexed all 17 RotR `.gib`s and all 31 base `.big`s: exactly **one** `RBCPwrPlnt1.dds` and one `RBCPwrPlnt2.dds` exist. No override, no shadowing. |
+| Texture format / size / mip count | `rbradar.dds` is DXT3 512×512 mips=10 on the *working* bunker; `rbcpwrplnt2.dds` is DXT1 512×512 mips=10 like `rbcmdbnkr1/2/3.dds`. Both shapes render elsewhere. |
+| HSV shift (team recolour) | `hsv=(0.00,0.00,0.00)` on black and working meshes alike. |
+| Vertex material | Identical at draw time: `lit=1 amb=(1,1,1) dif=(1,1,1) emi=(0,0,0) spc=(0.9,0.9,0.9) op=1.00 shin=0.1`, colour sources `0/0/0` (material, not vertex array) — the same values the bunker draws with. |
+| Vertex normals | Parsed both `.w3d`s: every mesh in both models has a full normal array, **zero degenerate normals, all unit length**. |
+| Prelit / vertex-channel differences | Mesh header attributes match: `attr=0x0 geom=0x0 prelit=0x0 sort=0 nmat=1 vchan=LOC\|NRM` on black and working meshes, with the same chunk list. |
+| Per-object light environment | `RBPWRPLNT` gets `lenv=1 amb=(0.50,0.40,0.30) l0=(0.90,0.70,0.60)` — a perfectly serviceable lighting environment, and **the crane and the Mishka carry the byte-identical one and render normally**. |
+| UV source / texture mapper | `uvsrc=0/0 mapper=-1/-1` on black and working meshes alike. |
+| Shader bits | `0x9441b` is the black `COALPLANT` *and* the working `RBCOMBNKR.STRUCTURE01`. Decoded: `DEPTHCOMPARE=3 DEPTHMASK=1 COLORMASK=1 DSTBLEND=0 PRIGRADIENT=1 SRCBLEND=1 TEXTURING=1 CULLMODE=1`. Identical. |
+
+The result of that round is worth stating plainly, because it is what makes the
+bug strange: **every input to the draw call is identical between a batch that
+renders and a batch that draws black, including two batches of the same object
+in the same frame.** The fence around the plant draws its chain-link texture at
+full brightness while the plant body two metres away is pure black.
+
+### The bisection — it is not the texture, it is the geometry
+
+With no property left to compare, the pipe was cut in half by experiment
+instead. Two texture swaps, in one build, in `DX8TextureCategoryClass::Render()`:
+
+1. bind the bunker's `rbcmdbnkr2.tga` — known to render — onto the black
+   `RBPWRPLNT.COALPLANT`;
+2. bind the plant's `rbcpwrplnt1.tga` — the suspect — onto the working
+   `RBCOMBNKR.STRUCTURE01`.
+
+The second is the control, and it is what makes the first mean anything: without
+it, "still black" cannot be told apart from "the swap never happened".
+
+**Result: the swap works, and the textures are innocent.**
+
+- The bunker visibly changed — it drew the plant's pink-striped panels and
+  signage instead of its own — and it stayed **fully lit and bright**. So
+  `rbcpwrplnt1.dds` samples and shades perfectly well; it just needs to be on
+  different geometry.
+- The plant stayed **pure black** while bound to a texture that was rendering
+  correctly on the building next to it in the same frame.
+
+That flips the investigation. Ten months of this have been spent on textures,
+materials and shaders; the failing half is the other one. The texture, the
+material, the shader and the light environment are all fine, and something about
+the **vertex data these particular meshes present to the draw** is not.
+
+### What to probe next
+
+The mesh's own `.w3d` is clean — positions produce a correct silhouette on
+screen, and every normal in the file is unit length — so the corruption, if that
+is what it is, happens between the file and the GPU. Read back what actually
+reaches the shared vertex buffer for one black mesh and one working mesh:
+`DX8TextureCategoryClass::Add_Mesh()` and `Vertex_Split_Table` are where the
+data is written, and the FVF for that batch says what the layout should be.
+Compare, per vertex, the normal, the UV and the diffuse against the values in
+the `.w3d`. Note that these meshes declare `vchan=LOC|NRM` — **no colour
+channel** — so whatever ends up in the vertex diffuse comes from the filler
+rather than the asset; if `D3DRS_COLORVERTEX` is on and the material's colour
+source resolves to `COLOR1`, a zero diffuse there shades exactly this black.
+
 ---
 
 ## The mesh probe, and how to run it

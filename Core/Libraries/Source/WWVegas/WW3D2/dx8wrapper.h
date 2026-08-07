@@ -914,7 +914,23 @@ WWINLINE void DX8Wrapper::Set_DX8_Light(int index, D3DLIGHT8* light)
 WWINLINE void DX8Wrapper::Set_DX8_Render_State(D3DRENDERSTATETYPE state, unsigned value)
 {
 	// Can't monitor state changes because setShader call to GERD may change the states!
+#if defined(__ANDROID__) && defined(GX_NO_STATE_CACHE)
+	// GeneralsX @diagnostic android-port 08/07/2026 Experiment for the black-model
+	// bug: send every state through instead of trusting the shadow copy.
+	//
+	// This cache only skips a call when it believes D3D already holds that value.
+	// If the device's real state ever diverges from the shadow -- a lost/reset
+	// device, a failed shader create, DXVK defaulting something differently from
+	// D3D8 -- the cache is what keeps the correct value from ever being re-sent,
+	// and a single batch can be left drawing with someone else's state while
+	// every engine-side property reads as correct. Which is exactly the shape of
+	// the black buildings: texture, material, shader, lighting and geometry all
+	// verified identical to batches that render.
+	//
+	// Costs a lot of redundant D3D calls, so it is opt-in and diagnostic only.
+#else
 	if (RenderStates[state]==value) return;
+#endif
 
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 	if (WW3D::Is_Snapshot_Activated()) {
@@ -944,7 +960,11 @@ WWINLINE void DX8Wrapper::Set_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURE
   	}
 
 	// Can't monitor state changes because setShader call to GERD may change the states!
+#if defined(__ANDROID__) && defined(GX_NO_STATE_CACHE)
+	// See the note in Set_DX8_Render_State above.
+#else
 	if (TextureStageStates[stage][(unsigned int)state]==value) return;
+#endif
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 	if (WW3D::Is_Snapshot_Activated()) {
 		StringClass value_name(0,true);

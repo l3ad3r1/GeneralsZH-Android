@@ -25,11 +25,22 @@ with their own menus, factions and skirmishes.
    one of its meshes binds a real texture (`0 UNTEXTURED` in the whole run), and
    its shader `0x9441b` is the same one 134 correctly-rendered meshes in the
    scene use. Mesh, material, pass count and shader are therefore all
-   eliminated; what is left is the **texture object itself** — everything
-   carrying `rbcpwrplnt1.tga` / `rbcpwrplnt2.tga` is black while sibling meshes
-   of the same object on other textures (`rbfence3.tga`, `tesla*.tga`) render.
-   Next probe: log the bound D3D surface's size/format/mips/pool, and its first
-   texels, for those textures versus `rbfence3`.
+   eliminated. A second round then read **everything the draw call is given** at
+   draw time and found it all identical to batches that render: the D3D texture
+   is bound and initialised, the .dds is intact and unique across every archive,
+   the vertex material, normals, mesh attributes, light environment, UV source
+   and shader bits all match. The fence of the *same object* draws its texture
+   at full brightness while the body is pure black. Bypassing `DX8Wrapper`'s
+   redundant-state-set cache (`-DGX_NO_STATE_CACHE`, still in the tree, off)
+   changed nothing either. A texture swap with a control then settled it:
+   putting the plant's texture on the bunker draws the plant's bricks **bright**,
+   and putting the bunker's texture on the plant leaves it **black**. So the
+   texture is innocent and **the fault is in the vertex data**, not the material
+   path. Next probe: read back the shared vertex buffer after
+   `DX8TextureCategoryClass::Add_Mesh()` and compare normals/UVs/diffuse against
+   the `.w3d` for one black and one working mesh. These meshes declare
+   `vchan=LOC|NRM` — no colour channel — so the vertex diffuse comes from the
+   filler, not the asset.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The

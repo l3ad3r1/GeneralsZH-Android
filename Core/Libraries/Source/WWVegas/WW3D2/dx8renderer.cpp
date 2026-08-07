@@ -43,6 +43,9 @@
 #include "dx8renderer.h"
 #if defined(__ANDROID__) && defined(GX_TRACE_MESH)
 #include <android/log.h>
+#include "vertmaterial.h"
+#include "lightenvironment.h"
+#include "mapper.h"
 #endif
 #include "dx8wrapper.h"
 #include "dx8polygonrenderer.h"
@@ -1761,16 +1764,21 @@ void DX8TextureCategoryClass::Render()
 		//
 		// Chasing buildings that render solid black. Everything else has been
 		// eliminated by measurement (see docs/port/KNOWN_ISSUE_BLACK_MODELS.md):
-		// textures all load, formats are ordinary DXT, materials and passes match
-		// buildings that render fine, and the missing-texture placeholder is
-		// magenta rather than black. An untextured draw with a modulate shader is
-		// the remaining way to get black, and this is the point where the texture
-		// for a batch is actually bound -- so if stage 0 is null here, every mesh
-		// in this batch draws black and gets named.
+		// the .dds files are intact and structurally identical to ones that draw
+		// fine, only one copy of each exists across every archive, materials and
+		// passes and shader bits match buildings that render, and the
+		// missing-texture placeholder is magenta rather than black.
 		//
-		// Also logs each mesh once regardless, so the affected model can be
-		// identified rather than guessed at from screenshots. The names in the
-		// known-issue doc were inferred by eye and have never been confirmed.
+		// This is the point where a batch's texture is actually bound, so it is
+		// where the bind can be checked -- and the check has to be on the *D3D*
+		// texture, not on the TextureClass. Those are different: Apply() binds
+		// Peek_D3D_Base_Texture(), which is null while a texture is uninitialised
+		// or still queued in the background loader, and null there means the batch
+		// draws black no matter how healthy its TextureClass looks.
+		//
+		// Also logs each mesh once regardless, with the texture's state at draw
+		// time, so the affected model can be identified rather than guessed at
+		// from screenshots.
 		{
 			// Deduplicate by mesh name rather than capping globally. A flat cap
 			// is useless here: the scene draws ~100 meshes per frame at 30fps, so
@@ -1794,19 +1802,105 @@ void DX8TextureCategoryClass::Render()
 				s_seen[s_seenCount++] = h;
 			}
 
-			const bool noTex = (Peek_Texture(0) == nullptr);
-			if (noTex && s_nullTrace < 400) {
+			TextureClass *tex0 = Peek_Texture(0);
+
+			// A non-null TextureClass is NOT the same thing as a bound texture.
+			// TextureClass::Apply() hands Peek_D3D_Base_Texture() to
+			// Set_DX8_Texture, and that pointer is null while a texture is
+			// uninitialised or still queued in the background loader -- so a mesh
+			// can carry a perfectly good TextureClass, name a real .dds, and still
+			// draw with nothing bound. The first version of this probe only
+			// checked tex0 != nullptr and therefore reported "0 UNTEXTURED" for a
+			// scene that had a solid black building in it. Check the D3D texture.
+			IDirect3DBaseTexture8 *d3d0 = tex0 ? tex0->Peek_D3D_Base_Texture() : nullptr;
+
+			if (tex0 == nullptr && s_nullTrace < 400) {
 				__android_log_print(ANDROID_LOG_WARN, "GX-MESH",
 					"UNTEXTURED mesh='%s' pass=%d shader=0x%x",
 					mname, (int)pass, (unsigned)Get_Shader().Get_Bits());
 				++s_nullTrace;
+			} else if (tex0 != nullptr && d3d0 == nullptr && s_nullTrace < 400) {
+				// The condition that actually produces black. Deduped by name like
+				// everything else here, so one long-lived mesh cannot eat the cap.
+				if (fresh) {
+					__android_log_print(ANDROID_LOG_WARN, "GX-MESH",
+						"NOD3D mesh='%s' tex0='%s' init=%d missing=%d %dx%d fmt=%d mips=%d pass=%d shader=0x%x",
+						mname, tex0->Get_Texture_Name().str(),
+						(int)tex0->Is_Initialized(), (int)tex0->Is_Missing_Texture(),
+						tex0->Get_Width(), tex0->Get_Height(),
+						(int)tex0->Get_Texture_Format(), (int)tex0->MipLevelCount,
+						(int)pass, (unsigned)Get_Shader().Get_Bits());
+					++s_nullTrace;
+				}
 			} else if (fresh) {
+				const Vector3 &hsv = tex0->Get_HSV_Shift();
+
+				// A batch is keyed by texture AND vertex material, so two meshes of
+				// one object can share a shader and still be lit completely
+				// differently. The material is the other half of what decides the
+				// colour, and it has never been read on device -- the "ambient and
+				// diffuse are (255,255,255)" note in the known-issue doc came from
+				// reading the .w3d offline, which says nothing about what the
+				// engine ends up applying. Colour *sources* matter as much as the
+				// colours: a diffuse source of VERTEX ignores the material value
+				// and takes the vertex array instead.
+				VertexMaterialClass *vm = const_cast<VertexMaterialClass *>(Peek_Material());
+				Vector3 amb(0, 0, 0), dif(0, 0, 0), emi(0, 0, 0), spc(0, 0, 0);
+				if (vm) {
+					vm->Get_Ambient(&amb);
+					vm->Get_Diffuse(&dif);
+					vm->Get_Emissive(&emi);
+					vm->Get_Specular(&spc);
+				}
+
+				// The one thing here that is per-object and computed at runtime
+				// rather than read from the asset. Every static property has now
+				// been eliminated -- the .dds and .w3d files of a black building
+				// and a working one are indistinguishable, and so are their
+				// textures, materials, shaders and passes at draw time. What is
+				// left is the lighting handed to this particular instance: a mesh
+				// whose LightEnvironment has no lights and a black ambient shades
+				// to black under a lit material, no matter how healthy everything
+				// else is.
+				LightEnvironmentClass *le = mesh->Get_Lighting_Environment();
+				Vector3 leAmb(0, 0, 0), leL0(0, 0, 0), leD0(0, 0, 0);
+				int leCount = -1;
+				if (le) {
+					leAmb = le->Get_Equivalent_Ambient();
+					leCount = le->Get_Light_Count();
+					if (leCount > 0) {
+						leL0 = le->Get_Light_Diffuse(0);
+						leD0 = le->Get_Light_Direction(0);
+					}
+				}
+
 				__android_log_print(ANDROID_LOG_INFO, "GX-MESH",
-					"mesh='%s' tex0='%s' pass=%d shader=0x%x",
-					mname,
-					Peek_Texture(0) ? Peek_Texture(0)->Get_Texture_Name().str() : "NULL",
-					(int)pass, (unsigned)Get_Shader().Get_Bits());
+					"mesh='%s' tex0='%s' d3d=%p init=%d missing=%d %dx%d fmt=%d mips=%d "
+					"hsv=(%.2f,%.2f,%.2f) pass=%d shader=0x%x | mat='%s' lit=%d "
+					"amb=(%.2f,%.2f,%.2f) dif=(%.2f,%.2f,%.2f) emi=(%.2f,%.2f,%.2f) "
+					"spc=(%.2f,%.2f,%.2f) op=%.2f shin=%.1f src(a/d/e)=%d/%d/%d "
+					"| lenv=%d amb=(%.2f,%.2f,%.2f) l0=(%.2f,%.2f,%.2f) dir0=(%.2f,%.2f,%.2f) "
+					"| uvsrc=%d/%d mapper=%d/%d",
+					mname, tex0->Get_Texture_Name().str(), (void *)d3d0,
+					(int)tex0->Is_Initialized(), (int)tex0->Is_Missing_Texture(),
+					tex0->Get_Width(), tex0->Get_Height(),
+					(int)tex0->Get_Texture_Format(), (int)tex0->MipLevelCount,
+					hsv.X, hsv.Y, hsv.Z,
+					(int)pass, (unsigned)Get_Shader().Get_Bits(),
+					vm ? vm->Get_Name() : "(none)", vm ? (int)vm->Get_Lighting() : -1,
+					amb.X, amb.Y, amb.Z, dif.X, dif.Y, dif.Z,
+					emi.X, emi.Y, emi.Z, spc.X, spc.Y, spc.Z,
+					vm ? vm->Get_Opacity() : -1.0f, vm ? vm->Get_Shininess() : -1.0f,
+					vm ? (int)vm->Get_Ambient_Color_Source() : -1,
+					vm ? (int)vm->Get_Diffuse_Color_Source() : -1,
+					vm ? (int)vm->Get_Emissive_Color_Source() : -1,
+					leCount, leAmb.X, leAmb.Y, leAmb.Z,
+					leL0.X, leL0.Y, leL0.Z, leD0.X, leD0.Y, leD0.Z,
+					vm ? vm->Get_UV_Source(0) : -1, vm ? vm->Get_UV_Source(1) : -1,
+					(vm && vm->Peek_Mapper(0)) ? vm->Peek_Mapper(0)->Mapper_ID() : -1,
+					(vm && vm->Peek_Mapper(1)) ? vm->Peek_Mapper(1)->Mapper_ID() : -1);
 			}
+
 		}
 #endif
 
