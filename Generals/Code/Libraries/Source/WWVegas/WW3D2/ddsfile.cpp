@@ -972,12 +972,36 @@ unsigned DDSFileClass::Get_Pixel(unsigned level,unsigned x,unsigned y) const
 			}
 		}
 		break;
+	// GeneralsX @bugfix android-port 08/07/2026 Decode DXT2/DXT3 here too. These
+	// returned opaque white, which is a different wrong answer from the one
+	// Get_4x4_Block gave (it wrote nothing at all), but wrong either way. Same
+	// layout as documented on the Get_4x4_Block cases: 8 bytes of 4-bit alpha,
+	// then a DXT1-style colour block that always uses four-colour mode.
 	case WW3D_FORMAT_DXT2:
-		return 0xffffffff;
 	case WW3D_FORMAT_DXT3:
-		return 0xffffffff;
-	case WW3D_FORMAT_DXT4:
-		return 0xffffffff;
+		{
+			const unsigned char* alpha_block=Get_Memory_Pointer(level)+(x/4)*16+((y/4)*(Get_Width(level)/4))*16;
+			const unsigned char* block_memory=alpha_block+8;
+
+			unsigned col0=RGB565_To_ARGB8888(*(unsigned short*)&block_memory[0]);
+			unsigned col1=RGB565_To_ARGB8888(*(unsigned short*)&block_memory[2]);
+			unsigned char line=block_memory[4+(y%4)];
+			line>>=(x%4)*2;
+
+			unsigned col=0;
+			switch (line&3) {
+			case 0: col=col0; break;
+			case 1: col=col1; break;
+			case 2: col=Combine_Colors(col1,col0,85); break;
+			case 3: col=Combine_Colors(col0,col1,85); break;
+			}
+
+			unsigned char alpha_byte=alpha_block[(y%4)*2+((x%4)>>1)];
+			unsigned alpha=((x%4)&1) ? (alpha_byte>>4) : (alpha_byte&0x0f);
+			alpha|=alpha<<4;
+			return (col&0x00ffffff)|(alpha<<24);
+		}
+	case WW3D_FORMAT_DXT4:	// premultiplied-alpha DXT5, same layout
 	case WW3D_FORMAT_DXT5:
 		{
 			const unsigned char* alpha_block=Get_Memory_Pointer(level)+(x/4)*16+((y/4)*(Get_Width(level)/4))*16;
@@ -1150,12 +1174,78 @@ bool DDSFileClass::Get_4x4_Block(
 			}
 		}
 		break;
+	// GeneralsX @bugfix android-port 08/07/2026 Decode DXT2/DXT3 instead of
+	// silently writing nothing.
+	//
+	// These cases used to `return false` without touching dest_ptr, which leaves
+	// the destination surface at whatever it already held -- zeros -- so every
+	// DXT3 texture reached the GPU as a fully transparent black image. On a
+	// device that cannot sample DXT directly, and therefore takes this
+	// decompression path for everything, that turns each DXT3-sourced material
+	// into a solid black surface.
+	//
+	// Measured on a TCL NXTPAPER by locking each bound texture at draw time and
+	// reading its texels back: of the textures in one Rise of the Reds skirmish,
+	// all 22 DXT1 and all 6 DXT5 surfaces held real data, and all 5 DXT3
+	// surfaces were 100% zero. That is the whole "black buildings" bug -- the
+	// Russian coal power plant's body is DXT3 while the fence around it is DXT5,
+	// which is exactly why one drew black and the other drew normally.
+	//
+	// DXT2 and DXT3 share a layout: 8 bytes of explicit 4-bit-per-texel alpha
+	// followed by a DXT1-style colour block. The difference is only that DXT2's
+	// colour is premultiplied by alpha. Both always use the four-colour
+	// interpretation -- unlike DXT1, the col0 <= col1 case does NOT select the
+	// three-colour-plus-transparent mode -- so the colour decode below is
+	// unconditional.
 	case WW3D_FORMAT_DXT2:
-		return false;
 	case WW3D_FORMAT_DXT3:
-		return false;
+		{
+			const unsigned char* alpha_block=Get_Memory_Pointer(level)+(source_x/4)*16+((source_y/4)*(Get_Width(level)/4))*16;
+			const unsigned char* block_memory=alpha_block+8;
+
+			unsigned col0=RGB565_To_ARGB8888(*(unsigned short*)&block_memory[0]);
+			unsigned col1=RGB565_To_ARGB8888(*(unsigned short*)&block_memory[2]);
+			if (has_hsv_shift) {
+				Recolor(col0,hsv_shift);
+				Recolor(col1,hsv_shift);
+			}
+
+			bool contains_alpha=false;
+			for (int y=0;y<4;++y) {
+				unsigned char* tmp_dest_ptr=dest_ptr;
+				dest_ptr+=dest_pitch;
+				unsigned char line=block_memory[4+y];
+				for (int x=0;x<4;++x) {
+					unsigned dest_pixel=0;
+					switch (line&3) {
+					case 0: dest_pixel=col0; break;
+					case 1: dest_pixel=col1; break;
+					case 2: dest_pixel=Combine_Colors(col1,col0,85); break;
+					case 3: dest_pixel=Combine_Colors(col0,col1,85); break;
+					}
+					line>>=2;
+
+					// Two texels per alpha byte, low nibble first. Replicate the
+					// nibble into the high bits so 0xf becomes 0xff rather than
+					// 0xf0, which would cap every "opaque" texel at 94%.
+					unsigned char alpha_byte=alpha_block[y*2+(x>>1)];
+					unsigned alpha=(x&1) ? (alpha_byte>>4) : (alpha_byte&0x0f);
+					alpha|=alpha<<4;
+					if (alpha!=0xff) contains_alpha=true;
+
+					dest_pixel=(dest_pixel&0x00ffffff)|(alpha<<24);
+					BitmapHandlerClass::Write_B8G8R8A8(tmp_dest_ptr,dest_format,dest_pixel);
+					tmp_dest_ptr+=dest_bpp;
+				}
+			}
+			return contains_alpha;
+		}
+	// DXT4 is DXT5 with premultiplied alpha -- identical block layout, so decode
+	// it here rather than leaving it to write nothing the way DXT3 did. The
+	// premultiply is not undone, so colour comes out slightly dark where alpha
+	// is partial; that is a far smaller error than an empty surface, and nothing
+	// in this game's assets is known to use DXT4.
 	case WW3D_FORMAT_DXT4:
-		return false;
 	case WW3D_FORMAT_DXT5:
 		{
 			// Init alphas
