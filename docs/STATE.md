@@ -40,7 +40,14 @@ with their own menus, factions and skirmishes.
    `DX8TextureCategoryClass::Add_Mesh()` and compare normals/UVs/diffuse against
    the `.w3d` for one black and one working mesh. These meshes declare
    `vchan=LOC|NRM` — no colour channel — so the vertex diffuse comes from the
-   filler, not the asset.
+   filler, not the asset. **Update:** the failing stage is now isolated. With
+   no texture bound the plant lights up correctly, so lighting, normals,
+   material and transform are all fine; with a good texture *and* emissive
+   white it renders in full detail, so nothing is drawn over it. The black is
+   produced where the texture is combined with the lit vertex colour. Next:
+   log the stage states (`D3DTSS_COLOROP`/`COLORARG1`/`COLORARG2`/
+   `TEXCOORDINDEX`, `D3DRS_TEXTUREFACTOR`) *after*
+   `Apply_Render_State_Changes()`, which is where they are actually set.
 2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The

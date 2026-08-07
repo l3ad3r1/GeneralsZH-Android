@@ -1927,6 +1927,13 @@ void DX8TextureCategoryClass::Render()
 					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENT));
 			}
 
+			// Bisection #2: is the black coming out of the lighting stage?
+			//
+			// Emissive is added after lighting and ignores lights and normals
+			// entirely, so forcing it white makes the mesh draw as plain
+			// texture * 1. If the plant suddenly shows its bricks, the pipe
+			// downstream of lighting is healthy and the lighting result for
+			// this mesh is zero. If it stays black, lighting is innocent too.
 		}
 #endif
 

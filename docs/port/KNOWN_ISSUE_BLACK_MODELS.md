@@ -209,6 +209,47 @@ note elsewhere crediting `-noshadowvolumes` with fixing "black terrain" cannot
 be right either, because the flag was inert when that was written.
 
 
+### The stage is isolated: it is the texture stage, not lighting
+
+Four overrides on `RBPWRPLNT.COALPLANT`, each with `RBCOMBNKR.STRUCTURE01` as a
+control so a null result cannot be confused with an override that never ran:
+
+| # | Override on the black mesh | Result |
+|---|---|---|
+| A | bind a known-good texture (`rbcmdbnkr2.tga`), lighting untouched | still black |
+| B | force material emissive to white, its own texture | still black |
+| C | **both** — good texture *and* emissive white | **renders**, full detail |
+| D | bind **no** texture, lighting untouched | **renders**, correctly lit |
+
+Taken one at a time A and B are each ambiguous, which is why both were run. Read
+together they are not:
+
+- **D settles lighting.** With the texture stage out of the picture the plant is
+  lit exactly like the bunker beside it -- correct form, correct shading. So the
+  light environment, the normals, the material and the transform all work, and
+  every "maybe it is the lighting" theory is finished. (Note this is also the
+  second time the light environment has come back clean: the crane carries a
+  byte-identical one and always rendered.)
+- **C settles the geometry.** The mesh rasterises with full detail. Nothing is
+  painted over it -- the overdraw theory is finished too.
+- So the black is produced where the texture is combined with the lit vertex
+  colour. Both terms are individually fine -- D proves the vertex colour is
+  non-zero, and the same `.dds` draws bright on the bunker -- yet their product
+  for this batch is zero.
+
+### What to probe next
+
+The texture-blend stage for this batch, read at the point it actually reaches
+D3D. `ShaderClass::Apply()` sets the stage states during
+`Apply_Render_State_Changes()`, which runs *after* the hook in
+`DX8TextureCategoryClass::Render()` -- so the existing probe cannot see them and
+a new one has to sit later. Log `D3DTSS_COLOROP`, `COLORARG1`, `COLORARG2`,
+`ALPHAOP` and `TEXCOORDINDEX` for stages 0 and 1, plus `D3DRS_TEXTUREFACTOR`,
+for the plant and the bunker. A `COLORARG2` resolving to something zero
+(`TFACTOR` with a zero factor, or `SPECULAR`) multiplies a perfectly good
+texture by nothing, which is exactly the signature above.
+
+
 ### What to probe next
 
 Stop instrumenting the material path; it is clean. Instrument the *texture* for
