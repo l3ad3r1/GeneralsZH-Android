@@ -572,6 +572,14 @@ public:
 	static const char* Get_DX8_Render_State_Name(D3DRENDERSTATETYPE state);
 	static const char* Get_DX8_Texture_Stage_State_Name(D3DTEXTURESTAGESTATETYPE state);
 	static unsigned Get_DX8_Render_State(D3DRENDERSTATETYPE state) { return RenderStates[state]; }
+	// GeneralsX @diagnostic android-port 08/07/2026 Read side of the texture
+	// stage state shadow, mirroring Get_DX8_Render_State above. The black-model
+	// investigation needs the stage states as they reach D3D, and they are only
+	// written here -- ShaderClass::Apply() sets them during
+	// Apply_Render_State_Changes(), which runs after the probe point in
+	// DX8TextureCategoryClass::Render().
+	static unsigned Get_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state)
+		{ return (stage < MAX_TEXTURE_STAGES) ? TextureStageStates[stage][(unsigned int)state] : 0u; }
 
 	// Names of the specific values of render states and texture stage states
 	static void Get_DX8_Texture_Stage_State_Value_Name(StringClass& name, D3DTEXTURESTAGESTATETYPE state, unsigned value);

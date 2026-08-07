@@ -250,6 +250,52 @@ for the plant and the bunker. A `COLORARG2` resolving to something zero
 texture by nothing, which is exactly the signature above.
 
 
+### The stage states are eliminated too
+
+The probe was added (`GX-STAGE` in `dx8renderer.cpp`, sitting immediately before
+the draw and forcing `Apply_Render_State_Changes()` first, since that is where
+`ShaderClass::Apply()` writes them). It needed a read side for the stage-state
+shadow, so `DX8Wrapper::Get_DX8_Texture_Stage_State()` was added to mirror the
+existing `Get_DX8_Render_State()`.
+
+Result: **byte-identical between the black plant and the rendering crane.**
+
+```
+COALPLANT (black)  s0 op=4 a1=2 a2=0 aop=4 aa1=2 aa2=0 tci=0 | s1 op=1 |
+                   tfactor=unset lighting=1 ambient=0x007f664c colorvtx=unset
+RVCRANE.CHASSIS    s0 op=4 a1=2 a2=0 aop=4 aa1=2 aa2=0 tci=0 | s1 op=1 |
+                   tfactor=unset lighting=1 ambient=0x007f664c colorvtx=unset
+```
+
+`op=4 a1=2 a2=0` is `MODULATE(TEXTURE, DIFFUSE)` -- exactly right, on both. Stage
+1 is disabled on both. Even the incidental fields match: the crane shares the
+plant's ambient and its never-written `colorvtx`, and renders anyway.
+
+Mip levels were checked at the same time, since only mip 0 had ever been
+decoded. The full chain of `RBCPwrPlnt1.dds` is intact and uniformly bright, and
+the *working* `RBCmdBnkr2.dds` shows the identical profile (the 2x2 and 1x1
+levels read dark for every texture -- that is sub-4x4 blocks being padded by the
+decoder, not a defect).
+
+### An inconsistency to resolve first
+
+Experiments A and C cannot both be right, and this needs settling before more
+probing:
+
+- **D** (no texture, normal lighting) renders, so the lit vertex colour is
+  non-zero.
+- **C** (good texture + emissive white) renders, so that texture samples fine on
+  this geometry.
+- **A** (the same good texture, normal lighting) was black. With a non-zero
+  diffuse and a texture that samples fine, `MODULATE` cannot produce zero.
+
+A and C were run in different builds. Re-run them in **one** build, side by side
+on two meshes of the same object -- good texture alone on `COALPLANT`, good
+texture plus emissive on `CPFOUNDATION` -- so a single frame settles which
+observation is wrong. Whichever it is, it is load-bearing: A is the entire basis
+for "the texture is innocent".
+
+
 ### What to probe next
 
 Stop instrumenting the material path; it is clean. Instrument the *texture* for

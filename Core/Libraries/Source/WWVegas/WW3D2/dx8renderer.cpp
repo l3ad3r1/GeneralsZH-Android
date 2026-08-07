@@ -2055,6 +2055,72 @@ void DX8TextureCategoryClass::Render()
 		if (mesh->Get_ObjectScale() != 1.0f)
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_NORMALIZENORMALS, TRUE);
 //--------------------------------------------------------------------
+#if defined(__ANDROID__) && defined(GX_TRACE_MESH)
+		// GeneralsX @diagnostic android-port 08/07/2026 The texture blend stage,
+		// read where it is actually set.
+		//
+		// Four overrides isolated the black buildings to this stage: with no
+		// texture bound the mesh lights correctly, and with a good texture plus
+		// emissive white it renders in full detail -- so lighting, normals,
+		// material, transform and rasterisation are all fine, and nothing is
+		// drawn over it. The black appears where the texture is combined with the
+		// lit vertex colour, even though both of those are known good.
+		//
+		// The other probe in this function cannot see this: ShaderClass::Apply()
+		// writes the stage states inside Apply_Render_State_Changes(), which runs
+		// later, at Draw. So this sits immediately before the draw and forces the
+		// deferred state through first. Apply_Render_State_Changes() is safe to
+		// call here -- Draw calls it anyway and it is idempotent.
+		{
+			static unsigned s_seenStage[512];
+			static int s_seenStageCount = 0;
+
+			const char *sname = mesh->Get_Name() ? mesh->Get_Name() : "(null)";
+			unsigned sh = 2166136261u;                      // FNV-1a
+			for (const char *c = sname; *c; ++c) { sh ^= (unsigned char)*c; sh *= 16777619u; }
+			sh ^= (unsigned)pass * 0x9E3779B9u;
+			sh ^= Get_Shader().Get_Bits() * 0x85EBCA6Bu;
+
+			bool freshStage = true;
+			for (int q = 0; q < s_seenStageCount; ++q) {
+				if (s_seenStage[q] == sh) { freshStage = false; break; }
+			}
+			if (freshStage &&
+			    s_seenStageCount < (int)(sizeof(s_seenStage)/sizeof(s_seenStage[0]))) {
+				s_seenStage[s_seenStageCount++] = sh;
+
+				DX8Wrapper::Apply_Render_State_Changes();
+
+				__android_log_print(ANDROID_LOG_INFO, "GX-STAGE",
+					"mesh='%s' pass=%d shader=0x%x | "
+					"s0 op=%u a1=%u a2=%u aop=%u aa1=%u aa2=%u tci=%u | "
+					"s1 op=%u a1=%u a2=%u aop=%u tci=%u | "
+					"tfactor=0x%08x lighting=%u ambient=0x%08x colorvtx=%u "
+					"dsrc=%u asrc=%u esrc=%u specular=%u",
+					sname, (int)pass, (unsigned)Get_Shader().Get_Bits(),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_COLOROP),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_COLORARG2),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG2),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(0, D3DTSS_TEXCOORDINDEX),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(1, D3DTSS_COLOROP),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(1, D3DTSS_COLORARG1),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(1, D3DTSS_COLORARG2),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(1, D3DTSS_ALPHAOP),
+					DX8Wrapper::Get_DX8_Texture_Stage_State(1, D3DTSS_TEXCOORDINDEX),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_TEXTUREFACTOR),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_LIGHTING),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENT),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_COLORVERTEX),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_DIFFUSEMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_AMBIENTMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_EMISSIVEMATERIALSOURCE),
+					DX8Wrapper::Get_DX8_Render_State(D3DRS_SPECULARENABLE));
+			}
+		}
+#endif
 		/*
 		** Render mesh using either sorting or immediate pipeline
 		*/
