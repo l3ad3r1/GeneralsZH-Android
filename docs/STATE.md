@@ -32,15 +32,9 @@ with their own menus, factions and skirmishes.
    and shader bits all match. The fence of the *same object* draws its texture
    at full brightness while the body is pure black. Bypassing `DX8Wrapper`'s
    redundant-state-set cache (`-DGX_NO_STATE_CACHE`, still in the tree, off)
-   changed nothing either. A texture swap with a control then settled it:
-   putting the plant's texture on the bunker draws the plant's bricks **bright**,
-   and putting the bunker's texture on the plant leaves it **black**. So the
-   texture is innocent and **the fault is in the vertex data**, not the material
-   path. Next probe: read back the shared vertex buffer after
-   `DX8TextureCategoryClass::Add_Mesh()` and compare normals/UVs/diffuse against
-   the `.w3d` for one black and one working mesh. These meshes declare
-   `vchan=LOC|NRM` — no colour channel — so the vertex diffuse comes from the
-   filler, not the asset. **Update:** the failing stage is now isolated. With
+   changed nothing either. A texture swap then appeared to clear the texture and
+   point at the vertex data — that reading was **wrong**, its control was misread,
+   and it is corrected below. **Update:** the failing stage was isolated. With
    no texture bound the plant lights up correctly, so lighting, normals,
    material and transform are all fine; with a good texture *and* emissive
    white it renders in full detail, so nothing is drawn over it. The black is
