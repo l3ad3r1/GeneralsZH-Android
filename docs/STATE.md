@@ -32,11 +32,22 @@ with their own menus, factions and skirmishes.
    Only RotR was affected because its building textures are DXT3; vanilla and
    ShockWave are DXT1/DXT5 throughout. Full trail in
    `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`.
-2. **Generals crashes on DXVK 2.6** (S24/Adreno) in
+2. **DXVK 2.6 crashes on the S24/Adreno** in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
-   on DXVK Native 1.9.2b (TCL/Mali). Zero Hour is fine on both. The
-   operator new/delete version script IS correctly applied to both engines --
-   checked, not assumed.
+   on DXVK Native 1.9.2b (TCL/Mali). The operator new/delete version script IS
+   correctly applied to both engines -- checked, not assumed.
+   **Corrected 08/08/2026: this is NOT Generals-only.** Zero Hour was recorded
+   here as fine on both; it is not. On v0.10 the S24 boots and renders the Zero
+   Hour main menu correctly at 3120x1440, then dies entering the skirmish setup
+   screen with the same fault address, through the text path:
+   `Render2DSentenceClass::Render()` -> `DX8Wrapper::Draw()` ->
+   `D3D9DeviceEx::UpdateFixedFunctionVS()` -> `D3D9ConstantBuffer::AllocSlice()`
+   -> `DxvkResourceAllocationPool::alloc()`. Generals crashes on the same
+   allocator via the swapchain path instead (`Presenter::createSwapChain()`).
+   Not a v0.10 regression as far as can be shown: `libdxvk_d3d9.so` and
+   `libdxvk_d3d8.so` are **byte-identical** between the v0.9 and v0.10 Vulkan
+   APKs (sha256 `e58fd83c6fc478b9` / `2343e312c6a9ed56`). A direct A/B against
+   v0.9 on device was not possible -- see the versionCode note below.
 3. **Loose mod files are not read.** The engine reads only archives and videos
    from a `-mod` dir, so `Data/Scripts/SkirmishScripts.scb` never loads. Affects
    Generals Continue and Project Raptor (AI may not work). Mods packing
@@ -102,6 +113,12 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
   Java. The `--require-dex-string` guard exists because that happened.
 - Never `adb uninstall` -- it deletes `Android/data/me.generalsx.zh/` including
   GameData. Always `install -r`.
+- **v0.10 bumped versionCode 1 -> 10, so older builds can no longer be
+  installed over it.** `install -r` fails with INSTALL_FAILED_VERSION_DOWNGRADE
+  and `-d` is refused on Android 16 for a non-debuggable package. Downgrading
+  now means uninstalling, which costs GameData -- so back the data up first,
+  or keep a device on the old build when an A/B is needed. This is what
+  blocked the v0.9-vs-v0.10 comparison on the S24.
 
 ## Devices
 
