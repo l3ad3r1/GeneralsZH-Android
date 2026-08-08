@@ -44,10 +44,14 @@ with their own menus, factions and skirmishes.
    `D3D9DeviceEx::UpdateFixedFunctionVS()` -> `D3D9ConstantBuffer::AllocSlice()`
    -> `DxvkResourceAllocationPool::alloc()`. Generals crashes on the same
    allocator via the swapchain path instead (`Presenter::createSwapChain()`).
-   Not a v0.10 regression as far as can be shown: `libdxvk_d3d9.so` and
-   `libdxvk_d3d8.so` are **byte-identical** between the v0.9 and v0.10 Vulkan
-   APKs (sha256 `e58fd83c6fc478b9` / `2343e312c6a9ed56`). A direct A/B against
-   v0.9 on device was not possible -- see the versionCode note below.
+   **Not a v0.10 regression -- settled by A/B on device 08/08/2026.** v0.9's
+   `libmain.so` swapped into the v0.10 APK (everything else in the two Vulkan
+   APKs is byte-identical except the two engine libs, so that is the only
+   variable) crashes at the same point, same fault address, same backtrace,
+   with only the BuildId differing (`bbd357b9` v0.9 vs `7d448b17` v0.10). No
+   uninstall was needed for this: keeping the v0.10 shell keeps versionCode 10,
+   which sidesteps the downgrade block below. Use that trick rather than
+   uninstalling whenever the engine is the variable under test.
 3. **Loose mod files are not read.** The engine reads only archives and videos
    from a `-mod` dir, so `Data/Scripts/SkirmishScripts.scb` never loads. Affects
    Generals Continue and Project Raptor (AI may not work). Mods packing
