@@ -13,11 +13,11 @@ Both engines ship in one APK and both run on device.
 | Skirmish / campaign | full missions (TCL) | reaches mission intro |
 | Touch, mouse, audio, video | verified | shared code, unverified |
 
-That table is the **TCL/Mali** picture. On the **S24/Adreno** the shipped Vulkan
-build boots and renders menus but dies on DXVK 2.6 before gameplay -- Zero Hour
-entering skirmish setup, Generals on the swapchain. The device itself is fine:
-the Mali build (DXVK Native 1.9.2b), re-signed for it, plays a skirmish at
-30 FPS. See open issue 2.
+As of v0.11 that table holds on **both** devices. The S24/Adreno was menu-only
+while the Vulkan build shipped DXVK 2.6 -- Zero Hour died entering skirmish
+setup, Generals on the swapchain -- but that was the DXVK version, not the
+hardware. On 1.9.2b the S24 plays a Zero Hour skirmish at 30 FPS and Generals
+reaches the mission intro, matching the TCL. Issue 2 is closed.
 
 Mods work: `.gib` archives load, Rise of the Reds and ShockWave both playable
 with their own menus, factions and skirmishes. RotR's black buildings are fixed
@@ -164,7 +164,7 @@ while 1.9.2b plays on both GPUs tested.
 
 | Artifact | Signed with | Verified |
 |---|---|---|
-| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | **both devices.** S24: skirmish at 30 FPS. TCL: RotR skirmish, coal power plant **and barracks** both rendering |
+| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | **both devices, both engines.** S24: ZH skirmish at 30 FPS, Generals to mission intro. TCL: RotR skirmish, coal power plant **and barracks** rendering |
 | `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | the same build, kept so the S24 can be updated in place |
 
 **Only the release-key APK is published**, so a device whose install came from a
