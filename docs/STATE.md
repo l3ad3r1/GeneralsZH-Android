@@ -13,10 +13,11 @@ Both engines ship in one APK and both run on device.
 | Skirmish / campaign | full missions (TCL) | reaches mission intro |
 | Touch, mouse, audio, video | verified | shared code, unverified |
 
-That table is the **TCL/Mali** picture. On the **S24/Adreno** both engines boot
-and render menus correctly but die on DXVK 2.6 before gameplay -- Zero Hour
-entering skirmish setup, Generals on the swapchain. See open issue 2; the S24 is
-currently a menu-only device.
+That table is the **TCL/Mali** picture. On the **S24/Adreno** the shipped Vulkan
+build boots and renders menus but dies on DXVK 2.6 before gameplay -- Zero Hour
+entering skirmish setup, Generals on the swapchain. The device itself is fine:
+the Mali build (DXVK Native 1.9.2b), re-signed for it, plays a skirmish at
+30 FPS. See open issue 2.
 
 Mods work: `.gib` archives load, Rise of the Reds and ShockWave both playable
 with their own menus, factions and skirmishes. RotR's black buildings are fixed
@@ -50,6 +51,15 @@ with their own menus, factions and skirmishes. RotR's black buildings are fixed
    `D3D9DeviceEx::UpdateFixedFunctionVS()` -> `D3D9ConstantBuffer::AllocSlice()`
    -> `DxvkResourceAllocationPool::alloc()`. Generals crashes on the same
    allocator via the swapchain path instead (`Presenter::createSwapChain()`).
+   **DXVK 2.6 is the whole problem -- 1.9.2b plays on Adreno (08/08/2026).** The
+   two v0.10 APKs differ in exactly two entries, the DXVK libraries; both engine
+   binaries and `classes.dex` are byte-identical. So the Mali APK re-signed with
+   `debug.keystore` and installed on the S24 is a single-variable test, and it
+   **plays**: skirmish setup renders, a match starts, and a 4:42 in-match soak
+   held 30 FPS with zero fatal signals. That eliminates the engine, Adreno, the
+   Vulkan 1.3 driver and memory pressure. It also means the
+   "Vulkan 1.3 -> DXVK 2.6, Mali -> 1.9.2b" build split is probably the wrong
+   axis: 1.9.2b works on both GPUs tested, 2.6 works on neither.
    **Not a v0.10 regression -- settled by A/B on device 08/08/2026.** v0.9's
    `libmain.so` swapped into the v0.10 APK (everything else in the two Vulkan
    APKs is byte-identical except the two engine libs, so that is the only
