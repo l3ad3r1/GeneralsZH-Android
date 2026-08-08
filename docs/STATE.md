@@ -22,7 +22,9 @@ history.
 
 Mods work: `.gib` archives load, Rise of the Reds and ShockWave both playable
 with their own menus, factions and skirmishes. RotR's black buildings are fixed
-(open issue 1).
+(open issue 1). **Generals Continue** carries both the Generals and Zero Hour
+campaigns on the Zero Hour engine, missions tested on the TCL -- which is why
+the standalone Generals game data was removed from that device (see below).
 
 ## Open issues
 
@@ -67,8 +69,16 @@ with their own menus, factions and skirmishes. RotR's black buildings are fixed
 
 3. **Loose mod files are not read.** The engine reads only archives and videos
    from a `-mod` dir, so `Data/Scripts/SkirmishScripts.scb` never loads. Affects
-   Generals Continue and Project Raptor (AI may not work). Mods packing
-   everything into `.gib` are unaffected.
+   Project Raptor (AI may not work). Mods packing everything into `.gib` are
+   unaffected.
+
+   Generals Continue is **less affected than this entry used to claim**: its
+   campaigns, maps and INI are all inside `.gib` (verified 08/08/2026 -- 28 USA,
+   23 GLA and 20 China campaign missions plus 12 Generals Challenge maps in
+   `!Continue35Map.gib`), and the missions are tested working on the TCL. What
+   is loose is 116 files under `Data/` -- mostly campaign `.bik` cinematics plus
+   `generals.str` -- so expect missing mission videos rather than missing
+   missions.
 4. **AI set to `Random` army in a mod = instant win.** Random resolves to one of
    the mod's added generals whose AI data the engine cannot drive, so that
    player is immediately defeated. Pick a faction explicitly. Not a port bug as
@@ -138,6 +148,12 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
   `GX-STAGE`, `GX-SHADOW`) must all be 0.
 - Never `adb uninstall` -- it deletes `Android/data/me.generalsx.zh/` including
   GameData. Always `install -r`.
+- **The TCL has no Generals game data any more** (removed 08/08/2026, ~1 GB,
+  superseded by Generals Continue). Selecting "Generals (original)" in the
+  launcher there now produces a silent `exit(1)` with no crash and no message --
+  that is missing data, not a graphics or engine fault. Do not re-diagnose it.
+  A 3.5 KB app-owned `Profiles/Generals/GeneralsX/` survives because shell
+  cannot chmod or delete an app-owned directory on a non-debuggable package.
 - **v0.10 bumped versionCode 1 -> 10, so older builds can no longer be
   installed over it.** `install -r` fails with INSTALL_FAILED_VERSION_DOWNGRADE
   and `-d` is refused on Android 16 for a non-debuggable package. Downgrading
@@ -149,7 +165,7 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 
 | Device | Serial | Keystore | Notes |
 |---|---|---|---|
-| TCL NXTPAPER | `987800005DB3824` | `my-release-key.jks` | Mali-G57, Vulkan 1.1, DXVK Native 1.9.2b |
+| TCL NXTPAPER | `987800005DB3824` | `my-release-key.jks` | Mali-G57, Vulkan 1.1, DXVK Native 1.9.2b. **No Generals profile** -- deleted 08/08/2026, superseded by the Generals Continue mod |
 | Galaxy S24 Ultra | `RZCY51R2A8D` | `debug.keystore` | Adreno 750, Vulkan 1.3, DXVK 2.6 |
 
 ## Releases
