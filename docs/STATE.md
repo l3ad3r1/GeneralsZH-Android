@@ -1,6 +1,6 @@
 # Android port — working state
 
-Last updated 2026-08-06. Written to compress a long session; read this before
+Last updated 2026-08-08. Written to compress a long session; read this before
 picking the work back up.
 
 ## Where things stand
@@ -10,11 +10,17 @@ Both engines ship in one APK and both run on device.
 | | Zero Hour | Generals |
 |---|---|---|
 | Boots, native resolution, terrain | yes | yes |
-| Skirmish / campaign | full missions | reaches mission intro |
+| Skirmish / campaign | full missions (TCL) | reaches mission intro |
 | Touch, mouse, audio, video | verified | shared code, unverified |
 
+That table is the **TCL/Mali** picture. On the **S24/Adreno** both engines boot
+and render menus correctly but die on DXVK 2.6 before gameplay -- Zero Hour
+entering skirmish setup, Generals on the swapchain. See open issue 2; the S24 is
+currently a menu-only device.
+
 Mods work: `.gib` archives load, Rise of the Reds and ShockWave both playable
-with their own menus, factions and skirmishes.
+with their own menus, factions and skirmishes. RotR's black buildings are fixed
+(open issue 1).
 
 ## Open issues
 
@@ -114,7 +120,15 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 
 - Mali variant MUST be built with `--dxvk-from`, not by grafting onto an old
   base: an old base brings its own `classes.dex`, which silently ships stale
-  Java. The `--require-dex-string` guard exists because that happened.
+  Java. The `--require-dex-string` guard exists because that happened. Note the
+  inverse is fine and useful for testing -- grafting one library onto a newer
+  base is how the v0.9-vs-v0.10 A/B was run without an uninstall.
+- **Check the diagnostic flags before shipping.** `-DGX_TRACE_MESH` lives in
+  `cppFlags` and is easy to leave on; it puts a per-mesh trace and a per-texture
+  `LockRect` readback in the draw path. Removing it changes the CMake hash, so
+  it also forces a full native rebuild -- budget ~5 min. Verify against the
+  finished APK, not the source: `grep -c GX-MESH <apk>` (also `GX-TEXEL`,
+  `GX-STAGE`, `GX-SHADOW`) must all be 0.
 - Never `adb uninstall` -- it deletes `Android/data/me.generalsx.zh/` including
   GameData. Always `install -r`.
 - **v0.10 bumped versionCode 1 -> 10, so older builds can no longer be
@@ -131,6 +145,20 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 | TCL NXTPAPER | `987800005DB3824` | `my-release-key.jks` | Mali-G57, Vulkan 1.1, DXVK Native 1.9.2b |
 | Galaxy S24 Ultra | `RZCY51R2A8D` | `debug.keystore` | Adreno 750, Vulkan 1.3, DXVK 2.6 |
 
-Releases are at v0.8; `main` has since gained the shadow toggle, `.gib`/`.scb`
-mod support, the Generals fixes, text fixes and the mod downloader. A v0.9 is
-due.
+## Releases
+
+**v0.10 is built and on both devices** (08/08/2026), `versionCode 10`,
+`versionName 0.10-android`:
+
+| Artifact | Signed with | Verified |
+|---|---|---|
+| `GeneralsZH-v0.10-TCL-Mali.apk` | `my-release-key.jks` | yes -- RotR skirmish, coal plant built in-match and rendering |
+| `GeneralsZH-v0.10-Vulkan.apk` | `debug.keystore` | boots + menus only; crashes entering skirmish (open issue 2) |
+
+Over v0.9 it carries the DXT3 decode fix (the black models), the
+`-noshadowvolumes` fix, and the version bump. Diagnostic probes are compiled
+out -- confirmed by grepping the shipped APK for the `GX-*` log tags before
+release.
+
+`ab-v09engine.apk` in the repo root is not a release: it is the A/B artifact,
+v0.9's engine libraries inside the v0.10 shell.
