@@ -17,7 +17,8 @@ As of v0.11 that table holds on **both** devices. The S24/Adreno was menu-only
 while the Vulkan build shipped DXVK 2.6 -- Zero Hour died entering skirmish
 setup, Generals on the swapchain -- but that was the DXVK version, not the
 hardware. On 1.9.2b the S24 plays a Zero Hour skirmish at 30 FPS and Generals
-reaches the mission intro, matching the TCL. Issue 2 is closed.
+reaches the mission intro, matching the TCL. See open issue 2 below for the
+history.
 
 Mods work: `.gib` archives load, Rise of the Reds and ShockWave both playable
 with their own menus, factions and skirmishes. RotR's black buildings are fixed
@@ -39,35 +40,31 @@ with their own menus, factions and skirmishes. RotR's black buildings are fixed
    Only RotR was affected because its building textures are DXT3; vanilla and
    ShockWave are DXT1/DXT5 throughout. Full trail in
    `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`.
-2. **DXVK 2.6 crashes on the S24/Adreno** ([issue #4](https://github.com/l3ad3r1/GeneralsZH-Android/issues/4)) in
-   `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
-   on DXVK Native 1.9.2b (TCL/Mali). The operator new/delete version script IS
-   correctly applied to both engines -- checked, not assumed.
-   **Corrected 08/08/2026: this is NOT Generals-only.** Zero Hour was recorded
-   here as fine on both; it is not. On v0.10 the S24 boots and renders the Zero
-   Hour main menu correctly at 3120x1440, then dies entering the skirmish setup
-   screen with the same fault address, through the text path:
-   `Render2DSentenceClass::Render()` -> `DX8Wrapper::Draw()` ->
-   `D3D9DeviceEx::UpdateFixedFunctionVS()` -> `D3D9ConstantBuffer::AllocSlice()`
-   -> `DxvkResourceAllocationPool::alloc()`. Generals crashes on the same
-   allocator via the swapchain path instead (`Presenter::createSwapChain()`).
-   **DXVK 2.6 is the whole problem -- 1.9.2b plays on Adreno (08/08/2026).** The
-   two v0.10 APKs differ in exactly two entries, the DXVK libraries; both engine
-   binaries and `classes.dex` are byte-identical. So the Mali APK re-signed with
-   `debug.keystore` and installed on the S24 is a single-variable test, and it
-   **plays**: skirmish setup renders, a match starts, and a 4:42 in-match soak
-   held 30 FPS with zero fatal signals. That eliminates the engine, Adreno, the
-   Vulkan 1.3 driver and memory pressure. It also means the
-   "Vulkan 1.3 -> DXVK 2.6, Mali -> 1.9.2b" build split is probably the wrong
-   axis: 1.9.2b works on both GPUs tested, 2.6 works on neither.
-   **Not a v0.10 regression -- settled by A/B on device 08/08/2026.** v0.9's
-   `libmain.so` swapped into the v0.10 APK (everything else in the two Vulkan
-   APKs is byte-identical except the two engine libs, so that is the only
-   variable) crashes at the same point, same fault address, same backtrace,
-   with only the BuildId differing (`bbd357b9` v0.9 vs `7d448b17` v0.10). No
-   uninstall was needed for this: keeping the v0.10 shell keeps versionCode 10,
-   which sidesteps the downgrade block below. Use that trick rather than
-   uninstalling whenever the engine is the variable under test.
+2. ~~**DXVK 2.6 crashes on the S24/Adreno.**~~ **RESOLVED 08/08/2026** by
+   dropping DXVK 2.6 -- v0.11 ships DXVK Native 1.9.2b on every device and the
+   Mali/Vulkan split is gone.
+   [Issue #4](https://github.com/l3ad3r1/GeneralsZH-Android/issues/4) is closed
+   as **avoided, not fixed**: the 2.6 fault itself was never diagnosed.
+
+   What it was: `DxvkResourceAllocationPool::alloc()`, fault addr
+   `0x2000000001` -- a corrupt or uninitialised value, not exhaustion. Both
+   engines hit the same allocator by different routes. Zero Hour entering
+   skirmish setup via the text path (`Render2DSentenceClass::Render()` ->
+   `DX8Wrapper::Draw()` -> `UpdateFixedFunctionVS()` -> `AllocSlice()`);
+   Generals earlier, on `Presenter::createSwapChain()`. Both are clear on
+   1.9.2b, on both GPUs.
+
+   Two things this cost, worth not repeating:
+   - It was recorded here for months as Generals-only ("Zero Hour is fine on
+     both"). It never was -- nobody had taken Zero Hour past the menus on that
+     device.
+   - The build split was organised around Vulkan version (1.3 -> 2.6, Mali ->
+     1.9.2b). That was the wrong axis: 1.9.2b works on both GPUs tested and 2.6
+     works on neither, so the split cost a working Adreno build and bought
+     nothing anyone had measured.
+
+   If 2.6 is ever revisited, the diagnosis and both backtraces are on issue #4.
+
 3. **Loose mod files are not read.** The engine reads only archives and videos
    from a `-mod` dir, so `Data/Scripts/SkirmishScripts.scb` never loads. Affects
    Generals Continue and Project Raptor (AI may not work). Mods packing
