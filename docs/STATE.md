@@ -38,7 +38,7 @@ with their own menus, factions and skirmishes. RotR's black buildings are fixed
    Only RotR was affected because its building textures are DXT3; vanilla and
    ShockWave are DXT1/DXT5 throughout. Full trail in
    `docs/port/KNOWN_ISSUE_BLACK_MODELS.md`.
-2. **DXVK 2.6 crashes on the S24/Adreno** in
+2. **DXVK 2.6 crashes on the S24/Adreno** ([issue #4](https://github.com/l3ad3r1/GeneralsZH-Android/issues/4)) in
    `DxvkResourceAllocationPool::alloc()`, fault addr `0x2000000001`. Works fine
    on DXVK Native 1.9.2b (TCL/Mali). The operator new/delete version script IS
    correctly applied to both engines -- checked, not assumed.
