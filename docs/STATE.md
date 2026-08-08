@@ -157,18 +157,25 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 
 ## Releases
 
-**v0.10 is built and on both devices** (08/08/2026), `versionCode 10`,
-`versionName 0.10-android`:
+**v0.11 is current** (08/08/2026), `versionCode 11` — **one APK for every
+device**, on DXVK Native 1.9.2b. The Mali/Vulkan split is gone: it existed only
+to give Vulkan 1.3 devices DXVK 2.6, which crashes before gameplay on Adreno
+while 1.9.2b plays on both GPUs tested.
 
 | Artifact | Signed with | Verified |
 |---|---|---|
-| `GeneralsZH-v0.10-TCL-Mali.apk` | `my-release-key.jks` | yes -- RotR skirmish, coal plant built in-match and rendering |
-| `GeneralsZH-v0.10-Vulkan.apk` | `debug.keystore` | boots + menus only; crashes entering skirmish (open issue 2) |
+| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | S24: skirmish at 30 FPS. Payload otherwise identical to v0.10 Mali, verified on the TCL |
+| `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | the same build, kept so the S24 can be updated in place |
 
-Over v0.9 it carries the DXT3 decode fix (the black models), the
-`-noshadowvolumes` fix, and the version bump. Diagnostic probes are compiled
-out -- confirmed by grepping the shipped APK for the `GX-*` log tags before
-release.
+**Only the release-key APK is published**, so a device whose install came from a
+debug-key build cannot be upgraded in place — `install -r` fails on signature
+mismatch and the only way past is an uninstall, which costs GameData. The
+unpublished debug-key APK exists for exactly that case; keep building one
+whenever the S24 needs updating.
+
+Over v0.10: DXVK 1.9.2b everywhere. v0.10 carried the DXT3 decode fix (the black
+models) and the `-noshadowvolumes` fix. Diagnostic probes are compiled out --
+confirmed by grepping the shipped APK for the `GX-*` log tags before release.
 
 `ab-v09engine.apk` in the repo root is not a release: it is the A/B artifact,
 v0.9's engine libraries inside the v0.10 shell.
