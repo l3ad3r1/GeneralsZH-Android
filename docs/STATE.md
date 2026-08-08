@@ -164,7 +164,7 @@ while 1.9.2b plays on both GPUs tested.
 
 | Artifact | Signed with | Verified |
 |---|---|---|
-| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | S24: skirmish at 30 FPS. Payload otherwise identical to v0.10 Mali, verified on the TCL |
+| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | **both devices.** S24: skirmish at 30 FPS. TCL: RotR skirmish, coal power plant **and barracks** both rendering |
 | `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | the same build, kept so the S24 can be updated in place |
 
 **Only the release-key APK is published**, so a device whose install came from a
