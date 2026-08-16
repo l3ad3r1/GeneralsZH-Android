@@ -86,8 +86,6 @@ elseif(ANDROID)
   configure_file(${CMAKE_SOURCE_DIR}/cmake/meson-android-aarch64-cross.ini.in
                  ${CMAKE_BINARY_DIR}/meson-android-aarch64-cross.ini @ONLY)
 
-  message(STATUS "DEBUG: SAGE_DXVK_USE_LOCAL_FORK=${SAGE_DXVK_USE_LOCAL_FORK}")
-  message(STATUS "DEBUG: DXVK_LOCAL_FORK_DIR=${DXVK_LOCAL_FORK_DIR}")
   if(SAGE_DXVK_USE_LOCAL_FORK AND EXISTS "${DXVK_LOCAL_FORK_DIR}/.git")
     set(DXVK_SOURCE_DIR "${DXVK_LOCAL_FORK_DIR}")
     # Apply the Android patch idempotently (same pattern as the iOS patch).
