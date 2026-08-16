@@ -70,14 +70,24 @@ elseif(ANDROID)
   # so APPLE is false even when building on macOS.
   if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     set(NDK_HOST_TAG "darwin-x86_64")
+    set(NDK_COMPILER_SUFFIX "")
+    set(NDK_TOOL_SUFFIX "")
+  elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    set(NDK_HOST_TAG "windows-x86_64")
+    set(NDK_COMPILER_SUFFIX ".cmd")
+    set(NDK_TOOL_SUFFIX ".exe")
   else()
     set(NDK_HOST_TAG "linux-x86_64")
+    set(NDK_COMPILER_SUFFIX "")
+    set(NDK_TOOL_SUFFIX "")
   endif()
 
   # Generate the meson cross-file from the template.
   configure_file(${CMAKE_SOURCE_DIR}/cmake/meson-android-aarch64-cross.ini.in
                  ${CMAKE_BINARY_DIR}/meson-android-aarch64-cross.ini @ONLY)
 
+  message(STATUS "DEBUG: SAGE_DXVK_USE_LOCAL_FORK=${SAGE_DXVK_USE_LOCAL_FORK}")
+  message(STATUS "DEBUG: DXVK_LOCAL_FORK_DIR=${DXVK_LOCAL_FORK_DIR}")
   if(SAGE_DXVK_USE_LOCAL_FORK AND EXISTS "${DXVK_LOCAL_FORK_DIR}/.git")
     set(DXVK_SOURCE_DIR "${DXVK_LOCAL_FORK_DIR}")
     # Apply the Android patch idempotently (same pattern as the iOS patch).

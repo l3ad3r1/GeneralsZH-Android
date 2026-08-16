@@ -1,4 +1,10 @@
 # GeneralsX @build fbraz 24/02/2026
+# GeneralsX @build fbraz3 04/02/2026 FetchContent integration for OpenAL Soft
+if(__OPENAL_CMAKE_INCLUDED)
+    return()
+endif()
+set(__OPENAL_CMAKE_INCLUDED TRUE)
+
 # GeneralsX @bugfix fbraz 10/03/2026 Use FetchContent for ALL platforms (macOS, Linux, Windows)
 # OpenAL audio library via FetchContent (openal-soft v1.24.2)
 #
