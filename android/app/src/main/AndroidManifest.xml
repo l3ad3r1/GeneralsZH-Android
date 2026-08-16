@@ -14,7 +14,8 @@
     - extractNativeLibs="false": keep .so libs page-aligned inside the APK so the
       loader mmaps them directly (smaller install, faster start).
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- OpenGL/Vulkan surface, audio (OpenAL/Oboe), and vibration for EVA cues. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
@@ -44,14 +45,28 @@
           sets the startup flags, and imports game files. It then starts
           GameActivity with the resulting argv.
 
-          GameActivity keeps exported="true" so `adb shell am start` and existing
-          shortcuts still work; without an ARGS extra it falls back to the saved
-          settings, so the game behaves the same however it was started.
+          GeneralsX @tweak security 15/08/2026
+          - LauncherActivity: added launchMode="singleTop" and explicit taskAffinity=""
+            to guard against task hijacking (StrandHogg 2.0).
+          - GameActivity: set exported="false" and taskAffinity="" so third-party apps
+            cannot bypass the launcher or inject arbitrary startup extras into the native engine.
+
+          GeneralsX @tweak security 16/08/2026
+          - GameActivity: launchMode singleInstance -> singleTop. MobSF flags
+            singleTask/singleInstance as a non-standard launch mode (a task-hijack
+            surface); singleTop is not flagged. The single-engine-instance guarantee
+            does not depend on the flag any more: the launcher starts GameActivity with
+            startActivity() and no FLAG_ACTIVITY_NEW_TASK, and both activities carry
+            taskAffinity="", so the game lives on top of the launcher's own task rather
+            than a separate one, and there is no path that leaves a second GameActivity
+            (and a second native engine + Vulkan surface) alive in the background.
         -->
         <activity
             android:name=".LauncherActivity"
             android:exported="true"
             android:label="Generals + Zero Hour"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
             android:screenOrientation="landscape"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
@@ -63,10 +78,25 @@
 
         <activity
             android:name=".GameActivity"
-            android:exported="true"
+            android:exported="false"
+            android:taskAffinity=""
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|fontScale|density"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTop"
             android:screenOrientation="landscape"
             android:resizeableActivity="false" />
+
+        <!--
+          GeneralsX @tweak security 16/08/2026
+          Strip androidx.profileinstaller.ProfileInstallReceiver, pulled in
+          transitively by androidx.appcompat 1.7.0. MobSF flags it because it is
+          exported and guarded only by android.permission.DUMP, whose protection
+          level it cannot verify. Baseline profiles precompile Java/Kotlin bytecode
+          ahead of time; this app is a native C++ engine with a thin SDLActivity
+          stub, so the receiver buys effectively nothing here. Removing it at
+          manifest-merge time drops both the attack surface and the finding.
+        -->
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:node="remove" />
     </application>
 </manifest>

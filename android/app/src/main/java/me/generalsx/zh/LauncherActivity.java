@@ -48,8 +48,9 @@ import java.util.List;
 
 public class LauncherActivity extends Activity {
 
-    private static final int REQ_IMPORT_GAME = 1001;
-    private static final int REQ_IMPORT_MOD  = 1002;
+    private static final int REQ_IMPORT_GAME   = 1001;
+    private static final int REQ_IMPORT_MOD    = 1002;
+    private static final int REQ_EXPORT_REPORT = 1003;
 
     private static final int BG     = 0xFF12161C;
     private static final int ACCENT = 0xFF4FA3FF;
@@ -68,6 +69,11 @@ public class LauncherActivity extends Activity {
     private final ModDownloader downloader = new ModDownloader();
     private List<String> profiles = new ArrayList<>();
     private List<String> mods = new ArrayList<>();
+
+    // GeneralsX @feature android-port 16/08/2026 Last game-file-check report, held
+    // so "Export report…" can write it out after the SAF create-document dialog
+    // returns on a later turn of the event loop.
+    private String lastReport;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -168,6 +174,13 @@ public class LauncherActivity extends Activity {
         }), weight1());
         dataRow.addView(smallButton("Storage info", new View.OnClickListener() {
             @Override public void onClick(View v) { showStorageInfo(); }
+        }), weight1());
+
+        // GeneralsX @feature android-port 16/08/2026 Pre-flight the installed
+        // archives before handing them to the native engine, so a truncated or
+        // mis-typed .big is named here instead of taking the engine down at load.
+        dataRow.addView(smallButton("Verify game files", new View.OnClickListener() {
+            @Override public void onClick(View v) { verifyGameFiles(); }
         }), weight1());
 
         // ---- mods ----
@@ -433,6 +446,8 @@ public class LauncherActivity extends Activity {
             askProfileNameThenImport(tree, dest);
         } else if (requestCode == REQ_IMPORT_MOD) {
             promptModName(tree);
+        } else if (requestCode == REQ_EXPORT_REPORT) {
+            writeReport(tree);
         }
     }
 
@@ -690,6 +705,97 @@ public class LauncherActivity extends Activity {
             .setMessage(sb.toString())
             .setPositiveButton("OK", null)
             .show();
+    }
+
+    // ------------------------------------------------ game file checker ----
+
+    /**
+     * Validate the selected profile's archives (and the active mod's) before the
+     * engine ever sees them. The header read is cheap, but a profile can hold
+     * dozens of files, so it runs off the UI thread.
+     */
+    private void verifyGameFiles() {
+        if (profiles.isEmpty()) { toast("No game data installed yet."); return; }
+
+        final String engineLabel = LauncherConfig.engineLabel(LauncherConfig.engine(this));
+        final String profileName = LauncherConfig.getSelectedProfile(this);
+        final File profileDir = LauncherConfig.profileDir(this, profileName);
+        final String modName = prefs().getString(LauncherConfig.KEY_MOD, "");
+        final File modsRoot = LauncherConfig.modsRoot(this);
+        final File modDir = (modName == null || modName.isEmpty() || modsRoot == null)
+                ? null : new File(modsRoot, modName);
+
+        setBusy(true);
+        statusText.setText("Checking game files…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final GameFileChecker.Result r = GameFileChecker.check(
+                        engineLabel, profileName, profileDir, modName, modDir);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        setBusy(false);
+                        updateSummary();
+                        lastReport = r.report;
+                        showCheckResult(r);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showCheckResult(GameFileChecker.Result r) {
+        TextView tv = new TextView(this);
+        tv.setText(r.report);
+        tv.setTextColor(TEXT);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setPadding(dp(16), dp(8), dp(16), dp(8));
+        tv.setTextIsSelectable(true);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(tv);
+
+        String title = r.problems == 0
+                ? "Game files OK (" + r.archivesChecked + " checked)"
+                : r.problems + " problem" + (r.problems == 1 ? "" : "s") + " found";
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(sv)
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Export report…", new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int w) { exportReport(); }
+            })
+            .show();
+    }
+
+    /** Let the user save the last report anywhere, via the system file picker. */
+    private void exportReport() {
+        if (lastReport == null) { toast("Run a check first."); return; }
+        String name = "generalsx-filecheck-"
+                + LauncherConfig.engine(this) + "-"
+                + sanitize(LauncherConfig.getSelectedProfile(this)).replace(' ', '_')
+                + ".txt";
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("text/plain");
+        i.putExtra(Intent.EXTRA_TITLE, name);
+        try {
+            startActivityForResult(i, REQ_EXPORT_REPORT);
+        } catch (Exception e) {
+            toast("No file picker available to save the report.");
+        }
+    }
+
+    private void writeReport(Uri dest) {
+        String report = lastReport;
+        if (report == null) { toast("Nothing to export."); return; }
+        try (java.io.OutputStream os = getContentResolver().openOutputStream(dest)) {
+            if (os == null) { toast("Could not open the chosen file."); return; }
+            os.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            os.flush();
+            toast("Report saved.");
+        } catch (Exception e) {
+            toast("Export failed: " + e.getMessage());
+        }
     }
 
     private void toast(String s) {
