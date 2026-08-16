@@ -51,6 +51,7 @@ public class LauncherActivity extends Activity {
     private static final int REQ_IMPORT_GAME   = 1001;
     private static final int REQ_IMPORT_MOD    = 1002;
     private static final int REQ_EXPORT_REPORT = 1003;
+    private static final int REQ_EXPORT_LOG    = 1004;
 
     private static final int BG     = 0xFF12161C;
     private static final int ACCENT = 0xFF4FA3FF;
@@ -74,6 +75,9 @@ public class LauncherActivity extends Activity {
     // so "Export report…" can write it out after the SAF create-document dialog
     // returns on a later turn of the event loop.
     private String lastReport;
+
+    // Engine log chosen in the export picker, held for the same reason.
+    private File pendingLogFile;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -176,11 +180,25 @@ public class LauncherActivity extends Activity {
             @Override public void onClick(View v) { showStorageInfo(); }
         }), weight1());
 
-        // GeneralsX @feature android-port 16/08/2026 Pre-flight the installed
-        // archives before handing them to the native engine, so a truncated or
-        // mis-typed .big is named here instead of taking the engine down at load.
-        dataRow.addView(smallButton("Verify game files", new View.OnClickListener() {
+        // GeneralsX @feature android-port 16/08/2026 Diagnostics, kept on their own
+        // row rather than crowded into the data row: the two together are what you
+        // reach for when the game will not start.
+        //   - Verify game files pre-flights the archives before the native engine
+        //     sees them, so a truncated .big is named here instead of taking the
+        //     engine down at load.
+        //   - Export engine log lifts the engine's own stderr off the device. That
+        //     log is the only place startup failures are explained (a DXVK/Vulkan
+        //     mismatch, for one, prints there and nowhere else), and until now it
+        //     needed adb to retrieve -- which is exactly what a player reporting a
+        //     bug does not have.
+        LinearLayout diagRow = new LinearLayout(this);
+        diagRow.setOrientation(LinearLayout.HORIZONTAL);
+        root.addView(diagRow, rowParams());
+        diagRow.addView(smallButton("Verify game files", new View.OnClickListener() {
             @Override public void onClick(View v) { verifyGameFiles(); }
+        }), weight1());
+        diagRow.addView(smallButton("Export engine log…", new View.OnClickListener() {
+            @Override public void onClick(View v) { exportEngineLog(); }
         }), weight1());
 
         // ---- mods ----
@@ -448,6 +466,8 @@ public class LauncherActivity extends Activity {
             promptModName(tree);
         } else if (requestCode == REQ_EXPORT_REPORT) {
             writeReport(tree);
+        } else if (requestCode == REQ_EXPORT_LOG) {
+            writeLog(tree);
         }
     }
 
@@ -796,6 +816,125 @@ public class LauncherActivity extends Activity {
         } catch (Exception e) {
             toast("Export failed: " + e.getMessage());
         }
+    }
+
+    // ------------------------------------------------- engine log export ----
+
+    /** The engine's own stderr, written by SageAndroid_Bootstrap into this dir. */
+    static final String LOG_CURRENT  = "generals-stderr.log";
+    static final String LOG_PREVIOUS = "generals-stderr-prev.log";
+
+    /**
+     * Offer the engine logs for export.
+     *
+     * Both sessions are offered, not just the latest: the engine rotates its log
+     * on every launch, so after a crash the run that actually failed is already
+     * the *previous* one by the time the launcher is back on screen. Exporting
+     * only the current log would hand over a fresh, empty-ish file and lose the
+     * evidence.
+     */
+    private void exportEngineLog() {
+        File root = LauncherConfig.storageRoot(this);
+        if (root == null) { toast("External storage unavailable."); return; }
+
+        File cur  = new File(root, LOG_CURRENT);
+        File prev = new File(root, LOG_PREVIOUS);
+
+        final List<File> logs = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        if (cur.isFile() && cur.length() > 0) {
+            logs.add(cur);
+            labels.add("Latest session  (" + GameDataImporter.human(cur.length()) + ")");
+        }
+        if (prev.isFile() && prev.length() > 0) {
+            logs.add(prev);
+            labels.add("Previous session  (" + GameDataImporter.human(prev.length()) + ")"
+                     + "\nusually the one that crashed");
+        }
+        if (logs.isEmpty()) {
+            new AlertDialog.Builder(this)
+                .setTitle("No engine log yet")
+                .setMessage("The engine writes its log when the game starts, so run the game "
+                          + "once and come back.\n\nExpected at:\n"
+                          + new File(root, LOG_CURRENT).getAbsolutePath())
+                .setPositiveButton("OK", null)
+                .show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Export engine log")
+            .setItems(labels.toArray(new String[0]),
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        askWhereToSaveLog(logs.get(which));
+                    }
+                })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void askWhereToSaveLog(File log) {
+        pendingLogFile = log;
+        boolean prev = LOG_PREVIOUS.equals(log.getName());
+        // Ends in .txt deliberately. The picker appends an extension matching the
+        // MIME type, so a name ending in .log comes back out as ".log.txt"; the
+        // log is plain text anyway, and .txt is what opens on a phone.
+        String name = "generalsx-engine-" + (prev ? "prev" : "latest") + "-"
+                + LauncherConfig.engine(this) + ".txt";
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("text/plain");
+        i.putExtra(Intent.EXTRA_TITLE, name);
+        try {
+            startActivityForResult(i, REQ_EXPORT_LOG);
+        } catch (Exception e) {
+            pendingLogFile = null;
+            toast("No file picker available to save the log.");
+        }
+    }
+
+    /**
+     * Copy the chosen log to the user's destination.
+     *
+     * Off the UI thread and streamed: the engine caps the log at 8 MB, which is
+     * more than enough to stall the main thread on slow storage.
+     */
+    private void writeLog(final Uri dest) {
+        final File src = pendingLogFile;
+        pendingLogFile = null;
+        if (src == null) { toast("Nothing to export."); return; }
+
+        setBusy(true);
+        statusText.setText("Exporting " + src.getName() + "…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String error = null;
+                try (java.io.InputStream in = new java.io.FileInputStream(src);
+                     java.io.OutputStream out = getContentResolver().openOutputStream(dest)) {
+                    if (out == null) {
+                        error = "could not open the chosen file";
+                    } else {
+                        byte[] buf = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                        out.flush();
+                    }
+                } catch (Exception e) {
+                    error = String.valueOf(e.getMessage());
+                }
+                final String err = error;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        setBusy(false);
+                        updateSummary();
+                        toast(err == null
+                                ? "Engine log saved (" + GameDataImporter.human(src.length()) + ")."
+                                : "Export failed: " + err);
+                    }
+                });
+            }
+        }).start();
     }
 
     private void toast(String s) {
