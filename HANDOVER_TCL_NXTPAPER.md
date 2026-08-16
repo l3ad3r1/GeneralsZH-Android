@@ -263,7 +263,10 @@ an action game), M2 may simply not be worth doing on this device.
 ## 5. Signing / device safety rules (do not violate)
 
 - **TCL (9469X):** installed cert = `my-release-key.jks` (repo root), store/key password `android`. `adb install -r` with that key preserves data. GameData on the TCL is re-pushable from the PC source (`C:\Users\renja\Downloads\Command and Conquer Generals + Zero Hour\Command & Conquer Generals Zero Hour\`), so a wipe is recoverable — but avoid it anyway.
-- **S24 Ultra (serial `RZCY51R2A8D`):** installed cert = `debug.keystore` (repo root), password `android`. **NEVER `adb uninstall` on the S24** — its GameData was hand-copied via Solid Explorer by the user and an uninstall deletes `Android/data/me.generalsx.zh/`. NOT `~/.android/debug.keystore` — wrong cert, install will fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+- **S24 Ultra (serial `RZCY51R2A8D`):** installed cert = `my-release-key.jks`, same as the TCL, **since 16/08/2026**. It now takes published releases directly with `adb install -r`; no debug-key build is needed for it any more.
+  - *This bullet used to say the opposite* — debug-key cert, and **never uninstall**, because GameData had been hand-copied via Solid Explorer. That warning is retired because what it protected is already gone: checked on 16/08/2026, `me.generalsx.zh` was not installed at all (absent even from `pm list packages -u`) and there was no `Android/data/me.generalsx.zh/` on the device. With nothing to preserve, v0.12 was installed fresh on the release key.
+  - The device therefore **has no game data**; the launcher will report none until archives are imported. Unlike the TCL there is no known PC-side source for the S24's copy, so re-importing is a manual step.
+  - Still true in general: `~/.android/debug.keystore` is *not* the in-repo `debug.keystore`. If a device is ever on a debug-signed install, use the repo copy or `install -r` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
 - Don't ship the TCL diagnostic APK further: it contains the `DXVK_LOG_LEVEX` byte-patch (logging left enabled). Rebuild clean from `GeneralsZH-icon2-aligned.apk` (pre-signing artifact, all fixes, no diag patch) or from source.
 
 ## 6. Build environment on this PC (Windows 11, git-bash + PowerShell)

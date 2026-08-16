@@ -131,8 +131,7 @@ the standalone Generals game data was removed from that device (see below).
 android/gradlew.bat :app:assembleRelease
 scripts/build/android/package-mali-apk.py --base <fresh APK> \
     --dxvk-from <old Mali APK> --require-dex-string LauncherActivity --output out.apk
-zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: android)
-                                     --ks debug.keystore       (S24, pass: android)
+zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (both devices, pass: android)
 ```
 
 - **Check which DXVK you are staging.** For a Java-only change the native build
@@ -178,7 +177,7 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 | Device | Serial | Keystore | Notes |
 |---|---|---|---|
 | TCL NXTPAPER | `987800005DB3824` | `my-release-key.jks` | Mali-G57, Vulkan 1.1, DXVK Native 1.9.2b. **No Generals profile** -- deleted 08/08/2026, superseded by the Generals Continue mod |
-| Galaxy S24 Ultra | `RZCY51R2A8D` | `debug.keystore` | Adreno 750, Vulkan 1.3. Runs DXVK Native 1.9.2b like everything else since v0.11 -- 2.6 is what crashed it before gameplay, despite the driver being capable of it |
+| Galaxy S24 Ultra | `RZCY51R2A8D` | `my-release-key.jks` (since 16/08/2026) | Adreno 750, Vulkan 1.3, Android 16. Runs DXVK Native 1.9.2b like everything else since v0.11 -- 2.6 is what crashed it before gameplay, despite the driver being capable of it. **Has no game data**: the app and its `Android/data/me.generalsx.zh/` were gone when checked on 16/08/2026, so the hand-copied GameData the old warnings protect no longer exists |
 
 ## Releases
 
@@ -202,9 +201,11 @@ Native 1.9.2b. What is new is in the launcher and the manifest.
 | Artifact | Signed with | Verified |
 |---|---|---|
 | `GeneralsZH-v0.12.apk` (shipped) | `my-release-key.jks` | **TCL only.** Upgraded in place from v0.11 with data intact; shell map 30 FPS, intro cinematic with video+audio; 39 archives checked in ~60 ms; exported log byte-identical to source |
-| `GeneralsZH-v0.12-debugkey.apk` (local, unpublished) | `debug.keystore` | same build, for the S24. **Not yet installed or tested on the S24** |
 | `GeneralsZH-v0.11.apk` | `my-release-key.jks` | **both devices, both engines.** S24: ZH skirmish at 30 FPS, Generals to mission intro. TCL: RotR skirmish, coal power plant **and barracks** rendering |
-| `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | the same build, kept so the S24 can be updated in place |
+| `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | historical. Was the in-place update path for the S24's debug-signed install, which no longer exists |
+
+A v0.12 debug-key twin was built on 16/08/2026 and then deleted unused -- see
+the S24 note below.
 
 ### Security (v0.12)
 
@@ -243,9 +244,21 @@ Still uninvestigated: the MD5 hash finding and external storage.
 
 **Only the release-key APK is published**, so a device whose install came from a
 debug-key build cannot be upgraded in place — `install -r` fails on signature
-mismatch and the only way past is an uninstall, which costs GameData. The
-unpublished debug-key APK exists for exactly that case; keep building one
-whenever the S24 needs updating.
+mismatch and the only way past is an uninstall, which costs GameData. That is
+why debug-key twins were built for the S24.
+
+**Both devices now run the release key, so no more twins are needed**
+(16/08/2026). The S24 turned out to have no install and no data at all: the
+package was absent even from `pm list packages -u`, and there was no
+`Android/data/me.generalsx.zh/` anywhere. Whatever the earlier warnings were
+protecting had already been lost. With nothing left to preserve, switching keys
+was free, so v0.12 went on with `my-release-key.jks` and the device now takes
+published releases directly. A v0.12 debug-key twin had been built for the old
+assumption and was deleted unused.
+
+Choose the key before importing game data, not after: with an empty device the
+switch costs nothing, and once ~4 GB of archives are in place it costs a wipe
+again.
 
 Over v0.10: DXVK 1.9.2b everywhere. v0.10 carried the DXT3 decode fix (the black
 models) and the `-noshadowvolumes` fix. Diagnostic probes are compiled out --
