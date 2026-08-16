@@ -223,9 +223,23 @@ play again leaves one task, one `GameActivity`, one process.
 
 Left as-is deliberately: cleartext traffic to `gen.insave.ovh`. The mod host has
 no TLS listener, the exemption is scoped to that one domain rather than the
-whole app, and downloads are checked against their published MD5. Still open
-and uninvestigated: the MD5 hash finding, external storage, and the hardcoded
-secrets flag.
+whole app, and downloads are checked against their published MD5.
+
+**"This app may contain hardcoded secrets" is a false positive** (checked
+16/08/2026). The GameSpy per-product keys are in the tree -- `h5T2f6`
+(ccgenerals), `D6s9k3` (ccgenzh), `g3T9s2` (ccgeneralsb) in `PeerThread.cpp`
+and `PersistentStorageThread.cpp` -- but every one of those literals sits
+inside a comment block. The live code assembles the key a character at a time
+(`secretKey[0]='D'; secretKey[1]='6'; ...`), which is EA's own obfuscation, so
+no contiguous key string exists in the binary: grepping the shipped
+`libmain.so` finds none of the three. What the scanner sees is the GameSpy SDK
+symbol name `gcd_secret_key`, plus framework strings in the dex
+(`VISIBILITY_SECRET`, `RESUME_TOKEN`, and `; password: ` from
+`AccessibilityNodeInfo.toString()`). The game name `ccgenzh` is in the binary
+and is not a secret. Worth noting these keys authenticate to GameSpy, shut down
+in 2014, and are public in the upstream EA source regardless.
+
+Still uninvestigated: the MD5 hash finding and external storage.
 
 **Only the release-key APK is published**, so a device whose install came from a
 debug-key build cannot be upgraded in place — `install -r` fails on signature
