@@ -7583,7 +7583,7 @@ Bool ScriptEngine::evaluateConditions( Script *pScript, Team *thisTeam, Player *
 	Bool testValue = false;
 
 #ifdef DEBUG_LOGGING
-#define COLLECT_CONDITION_EVAL_TIMES
+// #define COLLECT_CONDITION_EVAL_TIMES
 #endif
 #ifdef COLLECT_CONDITION_EVAL_TIMES
 	__int64 startTime64;

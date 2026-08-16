@@ -986,7 +986,7 @@ void TextureLoader::Load_Thumbnail(TextureBaseClass *tc)
 	if (d3d_texture == nullptr)
 	{
 		// GeneralsX @bugfix fbraz 04/05/2026 Avoid null dereference when fallback missing texture cannot be created.
-		WWDEBUG_SAY(("TextureLoader::Load_Thumbnail failed: null D3D texture for %s", tc->Get_Full_Path()));
+		WWDEBUG_SAY(("TextureLoader::Load_Thumbnail failed: null D3D texture for %s", (const char *)tc->Get_Full_Path()));
 		return;
 	}
 

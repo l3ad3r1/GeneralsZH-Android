@@ -44,6 +44,7 @@
 
 AsciiString GetWSAErrorString( Int error )
 {
+#ifdef _WIN32
 	switch (error)
 	{
 		CASE(WSABASEERR)
@@ -106,6 +107,11 @@ AsciiString GetWSAErrorString( Int error )
 		}
 	}
 	return AsciiString::TheEmptyString; // will not be hit, ever.
+#else
+	AsciiString ret;
+	ret.format("Socket error (%d)", error);
+	return ret;
+#endif
 }
 
 #undef CASE

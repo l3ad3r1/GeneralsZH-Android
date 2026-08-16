@@ -60,7 +60,7 @@
 
 #define no_INTENSE_DEBUG
 
-#define DEBUG_QPF
+//#define DEBUG_QPF
 
 #ifdef INTENSE_DEBUG
 #include "GameLogic/ScriptEngine.h"

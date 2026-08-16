@@ -283,6 +283,7 @@ void GameResultsThreadClass::Thread_Function()
 
 static const char *getWSAErrorString( Int error )
 {
+#ifdef _WIN32
 	switch (error)
 	{
 		CASE(WSABASEERR)
@@ -340,6 +341,9 @@ static const char *getWSAErrorString( Int error )
 		default:
 			return "Not a Winsock error";
 	}
+#else
+	return "Socket error";
+#endif
 }
 
 #undef CASE
