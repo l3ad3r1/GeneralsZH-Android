@@ -79,11 +79,36 @@ public class LauncherActivity extends Activity {
     // Engine log chosen in the export picker, held for the same reason.
     private File pendingLogFile;
 
+    // GeneralsX @bugfix android-port 16/08/2026 Both export flows hand control to
+    // another app (the system file picker) and only get it back in
+    // onActivityResult. Android is free to kill this process while that picker is
+    // in front -- likelier here than in most apps, since the device has just been
+    // running a 3 GB game -- and on return the activity is rebuilt with every
+    // field null, so the export silently did nothing. Carrying the two across
+    // saved state costs a few KB and makes the result usable whatever happened in
+    // between.
+    private static final String STATE_LAST_REPORT = "last_report";
+    private static final String STATE_PENDING_LOG = "pending_log";
+
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        if (saved != null) {
+            lastReport = saved.getString(STATE_LAST_REPORT);
+            String path = saved.getString(STATE_PENDING_LOG);
+            if (path != null) pendingLogFile = new File(path);
+        }
         setContentView(buildUi());
         refresh();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (lastReport != null) out.putString(STATE_LAST_REPORT, lastReport);
+        if (pendingLogFile != null) {
+            out.putString(STATE_PENDING_LOG, pendingLogFile.getAbsolutePath());
+        }
     }
 
     @Override
@@ -753,9 +778,15 @@ public class LauncherActivity extends Activity {
                         engineLabel, profileName, profileDir, modName, modDir);
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
+                        lastReport = r.report;
+                        // The check outlives the window it was started from if the
+                        // activity goes away mid-run (rotation, or the system
+                        // rebuilding it). Showing a dialog on a dead window throws
+                        // BadTokenException, so stop at the report -- it is already
+                        // in logcat under GameFileCheck either way.
+                        if (isFinishing() || isDestroyed()) return;
                         setBusy(false);
                         updateSummary();
-                        lastReport = r.report;
                         showCheckResult(r);
                     }
                 });
@@ -926,6 +957,8 @@ public class LauncherActivity extends Activity {
                 final String err = error;
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
+                        // The copy has already happened; only the UI needs guarding.
+                        if (isFinishing() || isDestroyed()) return;
                         setBusy(false);
                         updateSummary();
                         toast(err == null
