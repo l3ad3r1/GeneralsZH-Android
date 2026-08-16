@@ -135,6 +135,18 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
                                      --ks debug.keystore       (S24, pass: android)
 ```
 
+- **Check which DXVK you are staging.** For a Java-only change the native build
+  can be skipped entirely -- stage the `.so` set into `android/app/src/main/
+  jniLibs/arm64-v8a/` and build with `-PSAGE_SKIP_NATIVE_BUILD=true` -- but take
+  those libraries from the **shipped** `GeneralsZH-vX.Y.apk`, never from
+  `android/app/build/outputs/apk/release/app-release-unsigned.apk` or whatever
+  happens to be sitting in `jniLibs` already. Both carried **DXVK 2.6** as late
+  as 16/08/2026, which needs Vulkan 1.3 and hard-fails on the TCL: `Skipping
+  Vulkan 1.1 adapter` -> `No adapters found` -> `TheDisplay->init() threw unknown
+  exception`, then a clean exit with no crash and a task restart loop that looks
+  nothing like a library problem. The tell is file size --
+  1.09 MB / 2.64 MB for `libdxvk_d3d8/d3d9.so` is 1.9.2b; 6.2 MB / 37.7 MB is
+  2.6. `libmain.so` is identical either way, so size is the only signal.
 - Mali variant MUST be built with `--dxvk-from`, not by grafting onto an old
   base: an old base brings its own `classes.dex`, which silently ships stale
   Java. The `--require-dex-string` guard exists because that happened. Note the
@@ -166,19 +178,54 @@ zipalign -f -P 16 4 ; apksigner sign --ks my-release-key.jks   (TCL, pass: andro
 | Device | Serial | Keystore | Notes |
 |---|---|---|---|
 | TCL NXTPAPER | `987800005DB3824` | `my-release-key.jks` | Mali-G57, Vulkan 1.1, DXVK Native 1.9.2b. **No Generals profile** -- deleted 08/08/2026, superseded by the Generals Continue mod |
-| Galaxy S24 Ultra | `RZCY51R2A8D` | `debug.keystore` | Adreno 750, Vulkan 1.3, DXVK 2.6 |
+| Galaxy S24 Ultra | `RZCY51R2A8D` | `debug.keystore` | Adreno 750, Vulkan 1.3. Runs DXVK Native 1.9.2b like everything else since v0.11 -- 2.6 is what crashed it before gameplay, despite the driver being capable of it |
 
 ## Releases
 
-**v0.11 is current** (08/08/2026), `versionCode 11` — **one APK for every
-device**, on DXVK Native 1.9.2b. The Mali/Vulkan split is gone: it existed only
-to give Vulkan 1.3 devices DXVK 2.6, which crashes before gameplay on Adreno
-while 1.9.2b plays on both GPUs tested.
+**v0.12 is current** (16/08/2026), `versionCode 12` — a diagnostics release.
+The engine and renderer are unchanged from v0.11: same `libmain.so`, same DXVK
+Native 1.9.2b. What is new is in the launcher and the manifest.
+
+- **Verify game files** — walks every `.big`/`.gib` in the selected profile and
+  active mod, checking `BIGF`/`BIG4` magic and declared size against bytes on
+  disk. A truncated archive takes the native engine down before the first frame
+  and looks exactly like a driver bug from outside; this names the file instead.
+  Also logs to logcat under `GameFileCheck`.
+- **Export engine log** — writes `generals-stderr.log` (or `-prev.log`) out
+  through the system file picker. That file is the only place a DXVK/Vulkan
+  capability mismatch is explained: the process then exits cleanly, with no
+  crash and no tombstone. Both sessions are offered because the engine rotates
+  on every launch, so after a crash the failing run is already `-prev`.
+- **Manifest hardening** — cleared the outstanding MobSF findings; see
+  Security below.
 
 | Artifact | Signed with | Verified |
 |---|---|---|
-| `GeneralsZH-v0.11.apk` (shipped) | `my-release-key.jks` | **both devices, both engines.** S24: ZH skirmish at 30 FPS, Generals to mission intro. TCL: RotR skirmish, coal power plant **and barracks** rendering |
+| `GeneralsZH-v0.12.apk` (shipped) | `my-release-key.jks` | **TCL only.** Upgraded in place from v0.11 with data intact; shell map 30 FPS, intro cinematic with video+audio; 39 archives checked in ~60 ms; exported log byte-identical to source |
+| `GeneralsZH-v0.12-debugkey.apk` (local, unpublished) | `debug.keystore` | same build, for the S24. **Not yet installed or tested on the S24** |
+| `GeneralsZH-v0.11.apk` | `my-release-key.jks` | **both devices, both engines.** S24: ZH skirmish at 30 FPS, Generals to mission intro. TCL: RotR skirmish, coal power plant **and barracks** rendering |
 | `GeneralsZH-v0.11-debugkey.apk` (local, unpublished) | `debug.keystore` | the same build, kept so the S24 can be updated in place |
+
+### Security (v0.12)
+
+MobSF findings cleared, verified against the merged manifest in the finished
+APK: `GameActivity` is no longer exported; `LauncherActivity` carries an
+explicit `taskAffinity=""` against StrandHogg 2.0; `GameActivity` moved from
+`singleInstance` to `singleTop`; and `ProfileInstallReceiver` (arriving
+transitively via AndroidX, exported under `permission.DUMP`) is removed at
+merge time.
+
+Dropping `singleInstance` needed checking, since it was what guaranteed a
+single engine instance. That no longer depends on the flag: the launcher starts
+the game with no `NEW_TASK` and both activities carry `taskAffinity=""`, so the
+game sits on top of the launcher in one task. Verified on device — play, exit,
+play again leaves one task, one `GameActivity`, one process.
+
+Left as-is deliberately: cleartext traffic to `gen.insave.ovh`. The mod host has
+no TLS listener, the exemption is scoped to that one domain rather than the
+whole app, and downloads are checked against their published MD5. Still open
+and uninvestigated: the MD5 hash finding, external storage, and the hardcoded
+secrets flag.
 
 **Only the release-key APK is published**, so a device whose install came from a
 debug-key build cannot be upgraded in place — `install -r` fails on signature
