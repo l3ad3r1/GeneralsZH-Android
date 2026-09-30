@@ -1,12 +1,13 @@
 name: Build Android APK
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
 
@@ -30,9 +31,10 @@ jobs:
           java-version: 17
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           accept-android-sdk-licenses: true
+          packages: 'platform-tools'
 
       - name: Install Android NDK
         run: |
@@ -210,6 +212,32 @@ jobs:
           name: GeneralsZH-Android-arm64
           path: ${{ steps.find-apk.outputs.apk_path }}
           retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK_SRC="${{ steps.find-apk.outputs.apk_path }}"
+          TAG="${{ github.ref_name }}"
+          RELEASE_APK="GeneralsZH-${TAG}.apk"
+          cp -f "$APK_SRC" "$RELEASE_APK"
+          echo "Publishing release for $TAG with $RELEASE_APK"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$RELEASE_APK" --clobber
+          else
+            NOTES_OPT=()
+            if [ -f "RELEASE_NOTES_${TAG}.md" ]; then
+              NOTES_OPT=(--notes-file "RELEASE_NOTES_${TAG}.md")
+            elif [ -f "RELEASE_NOTES_v0.13.md" ]; then
+              NOTES_OPT=(--notes-file "RELEASE_NOTES_v0.13.md")
+            else
+              NOTES_OPT=(--generate-notes)
+            fi
+            gh release create "$TAG" "$RELEASE_APK" \
+              --title "GeneralsZH Android $TAG" \
+              "${NOTES_OPT[@]}"
+          fi
 
       - name: Upload Build Log
         if: always()
