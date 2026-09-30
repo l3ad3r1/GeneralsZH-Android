@@ -20,7 +20,7 @@ on:
         description: "Name of the built game artifact to download (from build workflow)"
     secrets:
       ASSETS_KEY:
-        required: true
+        required: false
         description: "Password for generalszh.7z / generals.7z in the test-files repo"
 
 jobs:

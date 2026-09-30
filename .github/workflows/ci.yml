@@ -25,6 +25,7 @@ jobs:
     outputs:
       zh-should-build: ${{ steps.filter.outputs.zh-should-build }}
       base-should-build: ${{ steps.filter.outputs.base-should-build }}
+      has-assets-key: ${{ steps.check-secrets.outputs.has-assets-key }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -54,6 +55,17 @@ jobs:
               - '.github/workflows/build-*.yml'
               - '.github/workflows/ci.yml'
 
+      - name: Check secrets availability
+        id: check-secrets
+        env:
+          ASSETS_KEY: ${{ secrets.ASSETS_KEY }}
+        run: |
+          if [ -n "$ASSETS_KEY" ]; then
+            echo "has-assets-key=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-assets-key=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build Trigger Summary
         run: |
           echo "### 🔍 CI Trigger (Granular)" >> $GITHUB_STEP_SUMMARY
@@ -69,6 +81,11 @@ jobs:
             echo "| GeneralsX Base (Generals) | ✅ Changes detected |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| GeneralsX Base (Generals) | ⏭️ No changes |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.check-secrets.outputs.has-assets-key }}" = "true" ]; then
+            echo "| Replay Test Assets Key | ✅ Present |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Replay Test Assets Key | ⏭️ Not configured (skipping replay tests) |" >> $GITHUB_STEP_SUMMARY
           fi
 
   build-linux-flatpak:
@@ -94,8 +111,8 @@ jobs:
   # platform replays from fbraz3/GeneralsXReplays, then runs headless replay simulations.
   replay-test-linux:
     name: Replay Tests (linux)
-    needs: [build-linux-flatpak]
-    if: needs.build-linux-flatpak.result == 'success'
+    needs: [detect-changes, build-linux-flatpak]
+    if: needs.build-linux-flatpak.result == 'success' && needs.detect-changes.outputs.has-assets-key == 'true'
     uses: ./.github/workflows/replay-tests.yml
     with:
       platform: linux-flatpak
@@ -105,8 +122,8 @@ jobs:
 
   replay-test-macos:
     name: Replay Tests (macos)
-    needs: [build-macos]
-    if: needs.build-macos.result == 'success'
+    needs: [detect-changes, build-macos]
+    if: needs.build-macos.result == 'success' && needs.detect-changes.outputs.has-assets-key == 'true'
     uses: ./.github/workflows/replay-tests.yml
     with:
       platform: macos
@@ -117,7 +134,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [build-linux-flatpak, build-macos, replay-test-linux, replay-test-macos]
+    needs: [detect-changes, build-linux-flatpak, build-macos, replay-test-linux, replay-test-macos]
     if: always()
     steps:
       - name: Generate Summary
@@ -131,8 +148,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Replay Tests | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|--------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux ZH replays | ${{ needs.replay-test-linux.result == 'success' && '✅ Pass' || needs.replay-test-linux.result == 'skipped' && '⏭️ Skipped' || needs.replay-test-linux.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| macOS ZH replays | ${{ needs.replay-test-macos.result == 'success' && '✅ Pass' || needs.replay-test-macos.result == 'skipped' && '⏭️ Skipped' || needs.replay-test-macos.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux ZH replays | ${{ needs.replay-test-linux.result == 'success' && '✅ Pass' || needs.replay-test-linux.result == 'skipped' && '⏭️ Skipped (no ASSETS_KEY)' || needs.replay-test-linux.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS ZH replays | ${{ needs.replay-test-macos.result == 'success' && '✅ Pass' || needs.replay-test-macos.result == 'skipped' && '⏭️ Skipped (no ASSETS_KEY)' || needs.replay-test-macos.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if Any Build or Replay Test Failed
         if: |
