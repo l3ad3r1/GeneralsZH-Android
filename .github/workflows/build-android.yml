@@ -1,0 +1,220 @@
+name: Build Android APK
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-android:
+    name: Android APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358" >> $GITHUB_ENV
+          echo "NDK installed: $(ls ${ANDROID_HOME}/ndk/28.2.13676358/)"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            cmake ninja-build meson python3-pip pkg-config zip glslang-tools
+          pip3 install meson
+          echo "Build tools:"
+          cmake --version
+          meson --version
+          ninja --version
+
+      - name: Apply DXVK Android patch
+        run: |
+          cd references/fbraz3-dxvk
+          git apply --check "${GITHUB_WORKSPACE}/Patches/dxvk-android.patch" 2>/dev/null || \
+            git apply "${GITHUB_WORKSPACE}/Patches/dxvk-android.patch"
+          echo "DXVK Android patch applied"
+
+      - name: Cache DXVK build
+        uses: actions/cache@v4
+        with:
+          path: android/app/.cxx
+          key: dxvk-cxx-${{ runner.os }}-${{ hashFiles('references/fbraz3-dxvk/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: dxvk-cxx-${{ runner.os }}-
+
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
+
+      - name: Build APK (assembleRelease) — pass 1
+        working-directory: android
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          GRADLE_OPTS: "-Xmx8g -XX:+UseG1GC -XX:MaxMetaspaceSize=512m"
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ${GITHUB_WORKSPACE}/build_android.log || true
+
+      - name: Build DXVK with meson (after pass 1, SDL3 now built)
+        run: |
+          set -euo pipefail
+          echo "==> Locating CXX build directory"
+          CXX_BASE=$(find android/app/.cxx -maxdepth 2 -type d -name "RelWithDebInfo" 2>/dev/null | head -1)
+          HASH_DIR=$(find "$CXX_BASE" -maxdepth 1 -type d ! -name "RelWithDebInfo" | head -1)
+          CXX_DIR="$HASH_DIR/arm64-v8a"
+          echo "CXX_DIR=$CXX_DIR"
+
+          DXVK_SRC="$GITHUB_WORKSPACE/references/fbraz3-dxvk"
+          DXVK_BUILD="$CXX_DIR/_deps/dxvk-build-android"
+          CROSS_FILE="$CXX_DIR/meson-android-aarch64-cross.ini"
+          SDL3_PC="$CXX_DIR/sdl3-pkgconfig"
+
+          echo "==> Step 1: Build SDL3 (DXVK meson needs it for pkg-config)"
+          ninja -C "$CXX_DIR" SDL3-shared
+
+          # Gradle remaps CMake output paths to build/intermediates/cxx/.
+          # The pkg-config shim (written by dx8.cmake at CMake configure time)
+          # expects libSDL3.so at $CXX_DIR/_deps/sdl3-build/. Copy it there.
+          SDL3_GRADLE=$(find android/app/build/intermediates/cxx -name "libSDL3.so" -type f 2>/dev/null | head -1)
+          if [ -n "$SDL3_GRADLE" ]; then
+            mkdir -p "$CXX_DIR/_deps/sdl3-build"
+            cp -f "$SDL3_GRADLE" "$CXX_DIR/_deps/sdl3-build/libSDL3.so"
+            echo "  Copied SDL3 from Gradle intermediates to $CXX_DIR/_deps/sdl3-build/"
+          fi
+          ls -lh "$CXX_DIR/_deps/sdl3-build/libSDL3.so" 2>&1 || { echo "FAIL: libSDL3.so not found"; exit 1; }
+
+          # DXVK meson.build uses dependency('SDL3') (uppercase). pkg-config
+          # is case-sensitive and looks for SDL3.pc. Our shim is sdl3.pc.
+          # Create uppercase aliases.
+          if [ ! -f "$SDL3_PC/SDL3.pc" ]; then
+            cp "$SDL3_PC/sdl3.pc" "$SDL3_PC/SDL3.pc"
+            sed -i 's/^Name: sdl3$/Name: SDL3/' "$SDL3_PC/SDL3.pc"
+            echo "  Created SDL3.pc alias"
+          fi
+
+          echo "==> Step 2: Wipe stale DXVK meson state (ExternalProject left bad config)"
+          rm -rf "$DXVK_BUILD"
+
+          echo "==> Step 3: Verify pkg-config finds SDL3 (uppercase)"
+          PKG_CONFIG_PATH="${SDL3_PC}:${PKG_CONFIG_PATH:-}" pkg-config --modversion SDL3 2>&1 || echo "WARNING: pkg-config cannot find SDL3"
+
+          echo "==> Step 5: Configure DXVK with meson"
+          export PKG_CONFIG_PATH="${SDL3_PC}:${PKG_CONFIG_PATH:-}"
+          meson setup "$DXVK_BUILD" "$DXVK_SRC" \
+            --cross-file "$CROSS_FILE" \
+            -Ddxvk_native_wsi=sdl3 \
+            --buildtype=release \
+            --wipe
+
+          echo "==> Step 6: Build DXVK .so files"
+          meson compile -C "$DXVK_BUILD" dxvk_d3d8 dxvk_d3d9
+
+          echo "==> Step 7: Verify DXVK builds"
+          for lib in libdxvk_d3d8.so libdxvk_d3d9.so; do
+            found=$(find "$DXVK_BUILD" -name "$lib" -type f 2>/dev/null | head -1)
+            if [ -n "$found" ]; then
+              echo "  OK: $found ($(stat -c%s "$found") bytes)"
+            else
+              echo "  FAIL: $lib not found in $DXVK_BUILD"
+              exit 1
+            fi
+          done
+
+      - name: Stage ALL .so to jniLibs and rebuild APK
+        working-directory: android
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          GRADLE_OPTS: "-Xmx8g -XX:+UseG1GC -XX:MaxMetaspaceSize=512m"
+        run: |
+          set -euo pipefail
+          JNI_LIBS="app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$JNI_LIBS"
+
+          CXX_BASE=$(find app/.cxx -maxdepth 2 -type d -name "RelWithDebInfo" 2>/dev/null | head -1)
+          HASH_DIR=$(find "$CXX_BASE" -maxdepth 1 -type d ! -name "RelWithDebInfo" | head -1)
+          CXX_DIR="$HASH_DIR/arm64-v8a"
+          DXVK_BUILD="$CXX_DIR/_deps/dxvk-build-android"
+
+          # Copy game .so files from CMake build tree and Gradle intermediates
+          GRADLE_CXX=$(find app/build/intermediates/cxx -maxdepth 3 -type d -name "obj" 2>/dev/null | head -1)
+          for lib in libmain.so libmain_generals.so libSDL3.so libSDL3_image.so libopenal.so libfreetype.so libglm.so libgamespy.so libc++_shared.so; do
+            found=$(find "$CXX_DIR" -maxdepth 5 -name "$lib" -type f 2>/dev/null | head -1)
+            if [ -z "$found" ] && [ -n "$GRADLE_CXX" ]; then
+              found=$(find "$GRADLE_CXX" -maxdepth 5 -name "$lib" -type f 2>/dev/null | head -1)
+            fi
+            if [ -n "$found" ]; then
+              cp -f "$found" "$JNI_LIBS/$lib"
+              echo "  staged $lib ($(stat -c%s "$JNI_LIBS/$lib") bytes)"
+            fi
+          done
+
+          # Copy DXVK .so files from meson build tree (separate from CMake)
+          for lib in libdxvk_d3d8.so libdxvk_d3d9.so; do
+            found=$(find "$DXVK_BUILD" -name "$lib" -type f 2>/dev/null | head -1)
+            if [ -n "$found" ]; then
+              cp -f "$found" "$JNI_LIBS/$lib"
+              echo "  staged $lib ($(stat -c%s "$JNI_LIBS/$lib") bytes)"
+            else
+              echo "  FAIL: $lib not found in $DXVK_BUILD"
+              exit 1
+            fi
+          done
+
+          echo "=== jniLibs ==="
+          ls -lh "$JNI_LIBS/"
+
+          # Pass 2: repackage with SAGE_SKIP_NATIVE_BUILD (skip CMake, just package jniLibs)
+          ./gradlew assembleRelease -PSAGE_SKIP_NATIVE_BUILD=true --no-daemon --stacktrace 2>&1 | tee -a ${GITHUB_WORKSPACE}/build_android.log
+
+      - name: Find APK
+        id: find-apk
+        run: |
+          APK=$(find android/app/build/outputs -name "*.apk" -type f 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "APK not found"
+            find android/app/build/outputs -type f 2>/dev/null || echo "No outputs"
+            tail -100 build_android.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "APK found: $APK"
+          echo "apk_path=$APK" >> $GITHUB_OUTPUT
+          ls -lh "$APK"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneralsZH-Android-arm64
+          path: ${{ steps.find-apk.outputs.apk_path }}
+          retention-days: 30
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-android
+          path: build_android.log
+          retention-days: 7

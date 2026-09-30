@@ -1941,7 +1941,10 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 	DX8Wrapper::Set_Light_Environment(rinfo.light_environment);
 
 	// Force shaders to update.
-	m_stageTwoTexture->restore();
+	// GeneralsX @bugfix 07/09/2026 Guard against null m_stageTwoTexture on first frame
+	// (e.g. when shader loading failed and tree buffer init was incomplete).
+	if (m_stageTwoTexture)
+		m_stageTwoTexture->restore();
 	DX8Wrapper::Set_Texture(0,nullptr);
 	DX8Wrapper::Set_Texture(1,nullptr);
 	ShaderClass::Invalidate();

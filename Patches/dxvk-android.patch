@@ -30,6 +30,41 @@ index 26afed45..abeacd3d 100644
  link_args = []
  
  if get_option('build_id')
+diff --git a/src/dxvk/dxvk_adapter.cpp b/src/dxvk/dxvk_adapter.cpp
+index 981b0003..f97b39c8 100644
+--- a/src/dxvk/dxvk_adapter.cpp
++++ b/src/dxvk/dxvk_adapter.cpp
+@@ -340,10 +340,14 @@ namespace dxvk {
+     // macOS/MoltenVK: VK_KHR_portability_subset MUST be enabled when the device supports it.
+     // Without it, vkCreateDevice rejects valid features (robustBufferAccess2, nullDescriptor, etc.)
+     // with VK_ERROR_FEATURE_NOT_PRESENT due to MoltenVK's portability subset enforcement.
++#ifdef __APPLE__
+     const bool hasPortabilitySubset =
+       m_deviceExtensions.supports(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) != 0u;
+     if (hasPortabilitySubset)
+       extensionsEnabled.add(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
++#else
++    const bool hasPortabilitySubset = false;
++#endif
+ 
+     DxvkNameList extensionNameList = extensionsEnabled.toNameList();
+ 
+@@ -520,6 +524,7 @@ namespace dxvk {
+     // VkPhysicalDevicePortabilitySubsetFeaturesKHR in VkDeviceCreateInfo.pNext set to
+     // device-queried values. Without this, MoltenVK may reject features it reported as
+     // supported in vkGetPhysicalDeviceFeatures2 (e.g. robustBufferAccess2, nullDescriptor).
++#ifdef __APPLE__
+     VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilityFeatures = {
+       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR };
+     if (hasPortabilitySubset) {
+@@ -528,6 +533,7 @@ namespace dxvk {
+       m_vki->vkGetPhysicalDeviceFeatures2(m_handle, &query);
+       portabilityFeatures.pNext = std::exchange(enabledFeatures.core.pNext, &portabilityFeatures);
+     }
++#endif
+ 
+     // Log feature support info an extension list
+     Logger::info(str::format("Device properties:"
 diff --git a/src/wsi/sdl3/wsi_platform_sdl3.cpp b/src/wsi/sdl3/wsi_platform_sdl3.cpp
 index 9975cdac..6c9309a9 100644
 --- a/src/wsi/sdl3/wsi_platform_sdl3.cpp

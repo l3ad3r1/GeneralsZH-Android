@@ -146,6 +146,12 @@ Cflags: -I\${includedir}
     INSTALL_COMMAND   ""
     UPDATE_DISCONNECTED TRUE
   )
+  # GeneralsX @build 07/09/2026 DXVK meson needs SDL3 built first for pkg-config detection.
+  if(TARGET SDL3-shared)
+    add_dependencies(dxvk_android_build SDL3-shared)
+  elseif(TARGET SDL3)
+    add_dependencies(dxvk_android_build SDL3)
+  endif()
 
   add_custom_command(
     OUTPUT  "${CMAKE_BINARY_DIR}/libdxvk_d3d9.so"

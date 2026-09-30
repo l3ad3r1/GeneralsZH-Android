@@ -196,6 +196,8 @@ else()
         Include/SDL3Device/GameClient/SDL3Mouse.h
         Source/SDL3Device/GameClient/SDL3Keyboard.cpp
         Include/SDL3Device/GameClient/SDL3Keyboard.h
+        # GeneralsX @bugfix 07/09/2026 Add BinkVideoPlayer stub for non-Windows builds
+        Source/VideoDevice/BinkVideoPlayerStub.cpp
     )
 
     # GeneralsX @refactor fbraz3 31/03/2026 OpenALAudioDevice sources now in Core/GameEngineDevice

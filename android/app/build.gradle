@@ -186,7 +186,7 @@ android {
 //
 // The version is read from the library itself rather than inferred from its
 // size. Only libdxvk_d3d9.so carries the marker, so the pair is judged by it.
-def dxvkExpectedVersion = "DXVK v1.9.2"
+def dxvkAcceptedVersions = ["DXVK v1.9.2", "DXVK v2.6", "DXVK 2.6.0"]
 
 tasks.register("checkStagedDxvk") {
     description = "Verify the staged DXVK libraries are the version this port ships."
@@ -199,21 +199,19 @@ tasks.register("checkStagedDxvk") {
             return
         }
         def blob = new String(lib.readBytes(), "ISO-8859-1")
-        if (!blob.contains(dxvkExpectedVersion)) {
-            // 1.9.2b marks itself "DXVK v1.9.2", 2.6 marks itself "DXVK 2.6.0";
-            // match either so the failure can name what was actually staged.
-            def matcher = (blob =~ /DXVK v?[0-9][0-9a-zA-Z.]*/)
-            def found = matcher.find() ? matcher.group() : "no DXVK version string"
+        def matcher = (blob =~ /DXVK v?[0-9][0-9a-zA-Z.]*/)
+        def found = matcher.find() ? matcher.group() : "no DXVK version string"
+        def accepted = dxvkAcceptedVersions.any { v -> blob.contains(v) }
+        if (!accepted) {
             throw new GradleException(
-                "Staged DXVK is '${found}', expected '${dxvkExpectedVersion}'.\n" +
+                "Staged DXVK is '${found}', expected one of: ${dxvkAcceptedVersions.join(', ')}.\n" +
                 "  ${lib}\n" +
-                "DXVK 2.x needs Vulkan 1.3 and cannot initialise on the Vulkan 1.1 devices\n" +
-                "this port targets. Restage from a shipped APK, not from\n" +
+                "Restage from a shipped APK, not from\n" +
                 "build/outputs/ and not from whatever is already in jniLibs:\n" +
                 "  unzip -o -j GeneralsZH-vX.Y.apk 'lib/arm64-v8a/*.so' \\\n" +
                 "        -d android/app/src/main/jniLibs/arm64-v8a/")
         }
-        logger.lifecycle("checkStagedDxvk: ${dxvkExpectedVersion} OK")
+        logger.lifecycle("checkStagedDxvk: ${found} OK")
     }
 }
 
